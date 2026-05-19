@@ -35,7 +35,7 @@ class BodyModelMeshMessage(_messages.Message, include_in_scene_serialization=Tru
 @dataclasses.dataclass
 class BodyModelPoseMessage(_messages.Message, include_in_scene_serialization=True):
     name: str
-    vertices: list[list[float]]
+    vertices: list[list[float]] | None
     boneTransforms: list[list[list[float]]]
 
 
@@ -48,12 +48,14 @@ class ViserBodyHandle:
         name: str,
         model: Any,
         pose: dict[str, np.ndarray],
+        vertices: np.ndarray,
     ) -> None:
         self.scene = scene
         self._name = name
         self.model = model
         self.model_name = model.__class__.__name__
         self.pose = pose
+        self._vertices = vertices
         self._wxyz = np.array([1.0, 0.0, 0.0, 0.0])
         self._position = np.zeros(3)
         self._visible = True
@@ -181,10 +183,14 @@ class ViserBodyHandle:
 
     def _apply_pose(self) -> None:
         vertices, bone_transforms = _skinning_state(self.model, self.pose)
+        vertex_payload = None
+        if not np.array_equal(vertices, self._vertices):
+            self._vertices = vertices
+            vertex_payload = np.asarray(vertices, dtype=np.float32).tolist()
         self.scene._websock_interface.queue_message(
             BodyModelPoseMessage(
                 self.name,
-                np.asarray(vertices, dtype=np.float32).tolist(),
+                vertex_payload,
                 np.asarray(bone_transforms, dtype=np.float32).tolist(),
             ),
         )
@@ -241,7 +247,7 @@ def add_body_model(
         ),
     )
     handle_type = _handle_type(model)
-    return handle_type(scene, name, model, pose)
+    return handle_type(scene, name, model, pose, vertices)
 
 
 def _handle_type(model: Any) -> type[ViserBodyHandle]:

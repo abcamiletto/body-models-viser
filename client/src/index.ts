@@ -29,7 +29,7 @@ type BodyModelMeshMessage = {
 type BodyModelPoseMessage = {
   type: "BodyModelPoseMessage";
   name: string;
-  vertices: Vec3[];
+  vertices: Vec3[] | null;
   boneTransforms: Mat4[];
 };
 
@@ -144,9 +144,11 @@ class BodyModelsViserRuntime {
           if (!mesh) {
             throw new Error(`Body model ${pose.name} has not been created.`);
           }
-          mesh.vertices = pose.vertices;
+          if (pose.vertices !== null) {
+            mesh.vertices = pose.vertices;
+          }
           mesh.boneTransforms = pose.boneTransforms;
-          out.push(this.meshMessage(mesh, pose.vertices, pose.boneTransforms));
+          out.push(this.meshMessage(mesh, mesh.vertices, pose.boneTransforms));
           break;
         }
         default:
