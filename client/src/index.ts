@@ -82,6 +82,14 @@ export class ViserBodyModelHandle<TParams extends BodyModelParams = BodyModelPar
     this.setPoseParam("body_pose", value);
   }
 
+  get body_pose(): NumericArray {
+    return this.bodyPose;
+  }
+
+  set body_pose(value: NumericArray) {
+    this.bodyPose = value;
+  }
+
   get handPose(): NumericArray {
     return this.param("hand_pose");
   }
@@ -90,12 +98,28 @@ export class ViserBodyModelHandle<TParams extends BodyModelParams = BodyModelPar
     this.setPoseParam("hand_pose", value);
   }
 
+  get hand_pose(): NumericArray {
+    return this.handPose;
+  }
+
+  set hand_pose(value: NumericArray) {
+    this.handPose = value;
+  }
+
   get headPose(): NumericArray {
     return this.param("head_pose");
   }
 
   set headPose(value: NumericArray) {
     this.setPoseParam("head_pose", value);
+  }
+
+  get head_pose(): NumericArray {
+    return this.headPose;
+  }
+
+  set head_pose(value: NumericArray) {
+    this.headPose = value;
   }
 
   get expression(): NumericArray {
@@ -114,12 +138,28 @@ export class ViserBodyModelHandle<TParams extends BodyModelParams = BodyModelPar
     this.setPoseParam("global_rotation", value);
   }
 
+  get global_rotation(): NumericArray {
+    return this.globalRotation;
+  }
+
+  set global_rotation(value: NumericArray) {
+    this.globalRotation = value;
+  }
+
   get globalTranslation(): NumericArray {
     return this.param("global_translation");
   }
 
   set globalTranslation(value: NumericArray) {
     this.setPoseParam("global_translation", value);
+  }
+
+  get global_translation(): NumericArray {
+    return this.globalTranslation;
+  }
+
+  set global_translation(value: NumericArray) {
+    this.globalTranslation = value;
   }
 
   setPose(updates: Partial<TParams>): void {
@@ -137,6 +177,10 @@ export class ViserBodyModelHandle<TParams extends BodyModelParams = BodyModelPar
     if (changed) {
       this.applyPose({ rebuildMesh });
     }
+  }
+
+  set_pose(updates: Partial<TParams>): void {
+    this.setPose(updates);
   }
 
   remove(): void {
@@ -195,6 +239,26 @@ export function addBodyModel<TParams extends BodyModelParams>(
   return new ViserBodyModelHandle(model, pose, root, mesh);
 }
 
+export function add_body_model<TParams extends BodyModelParams>(
+  scene: BodyModelScene,
+  name: string,
+  model: BodyModelLike<TParams>,
+  options: { color?: [number, number, number] } = {},
+): ViserBodyModelHandle<TParams> {
+  return addBodyModel(scene, name, model, options);
+}
+
+export function installBodyModelsViserPlugin(target: unknown = globalThis): void {
+  const scenePrototype = sceneApiPrototype(target);
+  if (scenePrototype === undefined || "add_body_model" in scenePrototype) {
+    return;
+  }
+  Object.defineProperties(scenePrototype, {
+    addBodyModel: { value: sceneAddBodyModel },
+    add_body_model: { value: sceneAddBodyModel },
+  });
+}
+
 export function createBodyModel<TParams extends BodyModelParams>(spec: {
   modelName: string;
   faces: BodyModelLike<TParams>["faces"];
@@ -221,9 +285,13 @@ export function createBodyModel<TParams extends BodyModelParams>(spec: {
 
 export const bodyModelsViserPlugin = {
   addBodyModel,
+  add_body_model,
   createBodyModel,
+  installBodyModelsViserPlugin,
   ViserBodyModelHandle,
 };
+
+installBodyModelsViserPlugin();
 
 function bindParamsFromRest<TParams extends BodyModelParams>(
   rest: TParams,
@@ -359,4 +427,37 @@ function flattenNumericArray(value: NumericArray): readonly number[] {
     return Array.from(value);
   }
   return value.flatMap((item) => (Array.isArray(item) ? item : [item]));
+}
+
+function sceneAddBodyModel<TParams extends BodyModelParams>(
+  this: BodyModelScene,
+  name: string,
+  model: BodyModelLike<TParams>,
+  options: { color?: [number, number, number] } = {},
+): ViserBodyModelHandle<TParams> {
+  return addBodyModel(this, name, model, options);
+}
+
+function sceneApiPrototype(target: unknown): Record<string, unknown> | undefined {
+  if (target === undefined || target === null) {
+    return undefined;
+  }
+  const value = target as { SceneApi?: { prototype?: Record<string, unknown> }; scene?: unknown };
+  if (value.SceneApi?.prototype !== undefined) {
+    return value.SceneApi.prototype;
+  }
+  const viser = (value as { viser?: unknown }).viser;
+  if (viser !== undefined) {
+    return sceneApiPrototype(viser);
+  }
+  if (typeof value.scene === "object" && value.scene !== null) {
+    return Object.getPrototypeOf(value.scene) as Record<string, unknown>;
+  }
+  return undefined;
+}
+
+declare global {
+  interface Window {
+    viser?: unknown;
+  }
 }

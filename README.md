@@ -77,6 +77,26 @@ const handle = addBodyModel(scene, "/body", bodyModel);
 handle.bodyPose = nextBodyPose;
 ```
 
+The browser module also exports `add_body_model()` and patches `viser.SceneApi`
+when a global `viser` object is present, so browser code can use the same shape
+as `body_models.extras.viser_plugin`:
+
+```ts
+import "./body-models-viser.js";
+
+const handle = scene.add_body_model("/body", bodyModel);
+handle.body_pose = nextBodyPose;
+```
+
+On the Python side, importing `body_models_viser` patches `viser.SceneApi` when
+viser is installed, and re-exports the same convenience function:
+
+```py
+import body_models_viser
+
+handle = scene.add_body_model("/body", model)
+```
+
 The `bodyModel` object must provide the same small contract used by the
 TypeScript tests:
 
@@ -87,7 +107,7 @@ TypeScript tests:
 - `forward(params)`
 - `forwardSkeleton(params)`
 
-`addBodyModel()` returns a handle shaped like the existing
+`addBodyModel()` and `add_body_model()` return a handle shaped like the existing
 `body_models.extras.viser_plugin.add_body_model()` handle, including mutable
 pose fields and `remove()`.
 
