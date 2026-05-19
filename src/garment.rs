@@ -1,4 +1,5 @@
 use anyhow::Result;
+use glam::{DQuat, DVec3};
 
 use crate::math;
 use crate::types::{GarmentModel, GarmentParams, Mat4, Vec3};
@@ -70,7 +71,7 @@ fn bind_skeleton(model: &GarmentModel, joint_positions: &[Vec3]) -> Vec<Mat4> {
         .bind_quats
         .iter()
         .zip(translations)
-        .map(|(&quat, translation)| math::rt_to_mat4(wxyz_to_mat3(quat), translation))
+        .map(|(&quat, translation)| math::rt_to_mat4(quat_to_mat3(wxyz_quat(quat)), translation))
         .collect();
     fk(&bind_local, &model.parents)
 }
@@ -86,9 +87,8 @@ fn posed_skeleton(model: &GarmentModel, pose: &[Vec3], bind_global: &[Mat4]) -> 
         .zip(pose)
         .zip(bind_translations)
         .map(|((&bind_quat, &pose), translation)| {
-            let pose_quat = axis_angle_to_quat_wxyz(pose);
-            let quat = mul_wxyz(bind_quat, pose_quat);
-            math::rt_to_mat4(wxyz_to_mat3(quat), translation)
+            let quat = wxyz_quat(bind_quat) * axis_angle_quat(pose);
+            math::rt_to_mat4(quat_to_mat3(quat), translation)
         })
         .collect();
     fk(&posed_local, &model.parents)
@@ -97,7 +97,7 @@ fn posed_skeleton(model: &GarmentModel, pose: &[Vec3], bind_global: &[Mat4]) -> 
 fn local_translations(
     model: &GarmentModel,
     positions: &[Vec3],
-    bind_global_quats: &[[f64; 4]],
+    bind_global_quats: &[DQuat],
 ) -> Vec<Vec3> {
     positions
         .iter()
@@ -108,19 +108,19 @@ fn local_translations(
                 position
             } else {
                 let offset = math::sub3(position, positions[parent as usize]);
-                rotate_wxyz(inverse_wxyz(bind_global_quats[parent as usize]), offset)
+                rotate(bind_global_quats[parent as usize].inverse(), offset)
             }
         })
         .collect()
 }
 
-fn propagate_quats(local: &[[f64; 4]], parents: &[isize]) -> Vec<[f64; 4]> {
-    let mut global = vec![[0.0; 4]; local.len()];
+fn propagate_quats(local: &[[f64; 4]], parents: &[isize]) -> Vec<DQuat> {
+    let mut global = vec![DQuat::IDENTITY; local.len()];
     for joint in 0..local.len() {
         global[joint] = if parents[joint] < 0 {
-            local[joint]
+            wxyz_quat(local[joint])
         } else {
-            mul_wxyz(global[parents[joint] as usize], local[joint])
+            global[parents[joint] as usize] * wxyz_quat(local[joint])
         };
     }
     global
@@ -172,65 +172,25 @@ fn fk(local: &[Mat4], parents: &[isize]) -> Vec<Mat4> {
     world
 }
 
-fn wxyz_to_mat3(q: [f64; 4]) -> crate::types::Mat3 {
-    math::quat_xyzw_to_mat3([q[1], q[2], q[3], q[0]])
+fn wxyz_quat(q: [f64; 4]) -> DQuat {
+    DQuat::from_xyzw(q[1], q[2], q[3], q[0]).normalize()
 }
 
-fn mul_wxyz(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
-    let a = canonicalize_wxyz(a);
-    let b = canonicalize_wxyz(b);
-    canonicalize_wxyz([
-        a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3],
-        a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
-        a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1],
-        a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0],
-    ])
+fn quat_to_mat3(q: DQuat) -> crate::types::Mat3 {
+    math::quat_xyzw_to_mat3([q.x, q.y, q.z, q.w])
 }
 
-fn inverse_wxyz(q: [f64; 4]) -> [f64; 4] {
-    let [w, x, y, z] = canonicalize_wxyz(q);
-    [w, -x, -y, -z]
+fn rotate(q: DQuat, point: Vec3) -> Vec3 {
+    let point = q * DVec3::from_array(point);
+    point.to_array()
 }
 
-fn rotate_wxyz(q: [f64; 4], point: Vec3) -> Vec3 {
-    let [w, x, y, z] = canonicalize_wxyz(q);
-    let [px, py, pz] = point;
-    let cross1_x = y * pz - z * py + w * px;
-    let cross1_y = z * px - x * pz + w * py;
-    let cross1_z = x * py - y * px + w * pz;
-    let cross2_x = y * cross1_z - z * cross1_y;
-    let cross2_y = z * cross1_x - x * cross1_z;
-    let cross2_z = x * cross1_y - y * cross1_x;
-    [
-        px + 2.0 * cross2_x,
-        py + 2.0 * cross2_y,
-        pz + 2.0 * cross2_z,
-    ]
-}
-
-fn canonicalize_wxyz(q: [f64; 4]) -> [f64; 4] {
-    let norm = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
-    let sign = if q[0] < 0.0 { -1.0 } else { 1.0 };
-    [
-        sign * q[0] / norm,
-        sign * q[1] / norm,
-        sign * q[2] / norm,
-        sign * q[3] / norm,
-    ]
-}
-
-fn axis_angle_to_quat_wxyz(v: Vec3) -> [f64; 4] {
+fn axis_angle_quat(v: Vec3) -> DQuat {
     let theta = math::norm3(v);
     if theta < 1e-12 {
-        return [1.0, 0.0, 0.0, 0.0];
+        return DQuat::IDENTITY;
     }
-    let scale = (theta * 0.5).sin() / theta;
-    [
-        (theta * 0.5).cos(),
-        v[0] * scale,
-        v[1] * scale,
-        v[2] * scale,
-    ]
+    DQuat::from_axis_angle(DVec3::from_array(v) / theta, theta)
 }
 
 fn pack_pose(params: &GarmentParams) -> Vec<Vec3> {

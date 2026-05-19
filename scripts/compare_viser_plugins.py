@@ -183,12 +183,7 @@ def dense_skin_weights(model_name: str, weights: dict[str, Any]) -> np.ndarray:
     if model_name == "smpl":
         return np.asarray(weights["lbs_weights"], dtype=np.float32)
     if model_name == "anny":
-        sparse_weights = np.asarray(weights["lbs_joint_weights"], dtype=np.float32)
-        sparse_indices = np.asarray(weights["lbs_joint_indices"], dtype=np.int64)
-        num_joints = len(weights["parents"])
-        dense = np.zeros((sparse_weights.shape[0], num_joints), dtype=np.float32)
-        np.put_along_axis(dense, sparse_indices, sparse_weights, axis=1)
-        return dense
+        return sparse_to_dense(weights["lbs_joint_indices"], weights["lbs_joint_weights"], len(weights["parents"]))
     if model_name == "soma":
         sparse_weights = np.asarray(weights["skin_joint_weights"], dtype=np.float32)
         sparse_indices = np.asarray(weights["skin_joint_indices"], dtype=np.int64)
@@ -198,15 +193,14 @@ def dense_skin_weights(model_name: str, weights: dict[str, Any]) -> np.ndarray:
         dense[rows, sparse_indices[rows, slots] - 1] = sparse_weights[rows, slots]
         return dense
     if model_name == "garment":
-        sparse_weights = np.asarray(weights["skin_joint_weights"], dtype=np.float32)
-        sparse_indices = np.asarray(weights["skin_joint_indices"], dtype=np.int64)
-        dense = np.zeros((sparse_weights.shape[0], len(weights["parents"])), dtype=np.float32)
-        np.put_along_axis(dense, sparse_indices, sparse_weights, axis=1)
-        return dense
+        return sparse_to_dense(weights["skin_joint_indices"], weights["skin_joint_weights"], len(weights["parents"]))
 
-    sparse_weights = np.asarray(weights["skin_weights"], dtype=np.float32)
-    sparse_indices = np.asarray(weights["skin_indices"], dtype=np.int64)
-    num_joints = len(weights["parents"])
+    return sparse_to_dense(weights["skin_indices"], weights["skin_weights"], len(weights["parents"]))
+
+
+def sparse_to_dense(indices: Any, weights: Any, num_joints: int) -> np.ndarray:
+    sparse_indices = np.asarray(indices, dtype=np.int64)
+    sparse_weights = np.asarray(weights, dtype=np.float32)
     dense = np.zeros((sparse_weights.shape[0], num_joints), dtype=np.float32)
     np.put_along_axis(dense, sparse_indices, sparse_weights, axis=1)
     return dense
