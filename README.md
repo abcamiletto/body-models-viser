@@ -17,9 +17,7 @@ into a viser frontend.
 - `scripts/generate_reference.py` exports model weights and Python reference
   outputs into `generated/`.
 - `tests/parity.rs` compares Rust output against the generated Python outputs.
-- `client/` contains the TypeScript viser-facing plugin contract.
-- `scripts/compare_viser_plugins.py` opens a side-by-side viser scene comparing
-  the original Python plugin with this Rust-backed output.
+- `client/` contains the small browser-side skinning helper.
 
 `generated/`, `target/`, `client/dist/`, and `client/node_modules/` are local
 build artifacts and are ignored.
@@ -44,11 +42,8 @@ Rust loads the same fixture JSON as Python, evaluates the model, and emits:
 }
 ```
 
-The TypeScript package mirrors the shape of the existing
-`body_models.extras.viser_plugin.add_body_model()` handle. It is intentionally
-small: callers provide a model object with `getRestPose`, `getBindParams`,
-`forward`, and `forwardSkeleton`, and the plugin wires that into a viser-like
-scene adapter.
+The Python package exposes the viser-facing API. The browser bundle only handles
+the web-specific part: applying skinning with every supplied vertex weight.
 
 ## User Usage
 
@@ -66,30 +61,29 @@ from body_models_viser import client_path
 print(client_path())
 ```
 
-`client_path()` returns the packaged `body-models-viser.js` bundle. A viser
-integration can serve or inject this file into the browser, then call the
-exported module API:
+Add a model to a viser scene:
 
-```ts
-import { addBodyModel } from "./body-models-viser.js";
+```py
+import body_models_viser as bmv
+from body_models.smpl.numpy import SMPL
 
-const handle = addBodyModel(scene, "/body", bodyModel);
-handle.bodyPose = nextBodyPose;
+handle = bmv.add_body_model(scene, "/body", SMPL(gender="neutral"))
+handle.body_pose = next_body_pose
 ```
 
-The `bodyModel` object must provide the same small contract used by the
-TypeScript tests:
+`client_path()` returns the packaged `body-models-viser.js` bundle. A browser
+integration can serve or inject this file, then call the exported skinning API:
 
-- `faces`
-- `skinWeights`
-- `getRestPose()`
-- `getBindParams(params)`
-- `forward(params)`
-- `forwardSkeleton(params)`
+```ts
+import { skinVertices } from "./body-models-viser.js";
 
-`addBodyModel()` returns a handle shaped like the existing
-`body_models.extras.viser_plugin.add_body_model()` handle, including mutable
-pose fields and `remove()`.
+const vertices = skinVertices({
+  vertices: bindVertices,
+  skinWeights,
+  skinJoints,
+  boneTransforms,
+});
+```
 
 For development against the TypeScript source, import from `client/src/index.ts`
 and run `npm test` from `client/`. Do not commit `client/dist/`; CI builds the
@@ -128,13 +122,6 @@ Build and test the TypeScript package:
 ```sh
 cd client
 npm test
-```
-
-Open the side-by-side viser comparison:
-
-```sh
-uv run --project ../body-models --no-sync \
-  scripts/compare_viser_plugins.py --model both --case shape_pose
 ```
 
 ## CI And Releases
