@@ -21,11 +21,13 @@ from viser import _messages
 
 _HANDLE_TYPES: dict[str, type["ViserBodyHandle"]] = {}
 _IDENTITY_PARAMS = {"gender", "age", "muscle", "weight", "height", "proportions"}
+_BIND_LBS_MODELS = {"garmentmeasurements"}
 _BASE_VERTEX_PARAMS = {
     "anny": _IDENTITY_PARAMS,
     "smpl": {"shape"},
     "smplh": {"shape"},
     "smplx": {"shape", "expression"},
+    "garmentmeasurements": {"shape"},
     "mhr": {"shape", "expression"},
     "soma": {"identity", "scale_params"},
 }
@@ -34,6 +36,7 @@ _VERTEX_PARAMS = {
     "smpl": {"shape", "body_pose"},
     "smplh": {"shape", "body_pose", "hand_pose"},
     "smplx": {"shape", "body_pose", "hand_pose", "head_pose", "expression"},
+    "garmentmeasurements": {"shape"},
     "mhr": {"shape", "body_pose", "hand_pose", "expression"},
     "soma": {"identity", "scale_params", "body_pose", "head_pose", "hand_pose", "global_rotation"},
 }
@@ -247,6 +250,7 @@ _HANDLE_TYPES.update({
     "smpl": SmplBodyHandle,
     "smplh": SmplhBodyHandle,
     "smplx": SmplxBodyHandle,
+    "garmentmeasurements": ViserBodyHandle,
     "mhr": MhrBodyHandle,
     "soma": SomaBodyHandle,
 })
@@ -359,6 +363,8 @@ def _base_vertices(
         return _as_unbatched_array(vertices)
     if model_name == "soma":
         return _soma_prepared_identity(model, pose).bind_shape_active * 0.01
+    if model_name in _BIND_LBS_MODELS:
+        return _bind_vertices(model, pose)
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
@@ -385,6 +391,8 @@ def _vertices(
         return _mhr_vertices(model, pose, base_vertices)
     if model_name == "soma":
         return _soma_vertices(model, pose, base_vertices)
+    if model_name in _BIND_LBS_MODELS:
+        return base_vertices
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
@@ -460,6 +468,8 @@ def _bone_transforms(
         return _mhr_bone_transforms(model, pose)
     if model_name == "soma":
         return _soma_bone_transforms(model, pose)
+    if model_name in _BIND_LBS_MODELS:
+        return _bind_bone_transforms(model, pose)
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
@@ -704,6 +714,32 @@ def _mhr_vertices(
         xp=np,
     )
     return _as_unbatched_array(vertices)
+
+
+def _bind_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "vertices 3"]:
+    return _as_unbatched_array(model.forward_vertices(**model.get_bind_params(**pose)))
+
+
+def _bind_bone_transforms(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 4 4"]:
+    bind = model.forward_skeleton(**model.get_bind_params(**pose))
+    posed = model.forward_skeleton(**pose)
+    return _as_unbatched_array(posed @ np.linalg.inv(bind))
 
 
 def _mhr_bone_transforms(

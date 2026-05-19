@@ -31,6 +31,7 @@ import viser
 from body_models.anny.numpy import ANNY
 from body_models.base import BodyModel
 from body_models.constants import Joint
+from body_models.garment_measurements.numpy import GarmentMeasurements
 from body_models.mhr.numpy import MHR
 from body_models.smpl.numpy import SMPL
 from body_models.smplh.numpy import SMPLH
@@ -80,6 +81,17 @@ SOMA_BODY_POSE_JOINTS = [
     ("R Leg", 18),
 ]
 SOMA_HEAD_POSE_JOINTS = [("Head", 0)]
+GARMENT_BODY_POSE_JOINTS = [
+    ("Spine1", 2),
+    ("Spine2", 3),
+    ("Neck", 4),
+    ("L Shoulder", 7),
+    ("L Arm", 8),
+    ("R Shoulder", 12),
+    ("R Arm", 13),
+    ("L Leg", 17),
+    ("R Leg", 21),
+]
 
 GRID_COLS = 3
 GRID_SPACING_X = 1.8
@@ -90,6 +102,7 @@ MODEL_COLORS = {
     "SMPLH": (216, 191, 216),
     "SMPLX": (255, 182, 193),
     "ANNY": (255, 218, 185),
+    "Garment": (190, 220, 175),
     "MHR": (221, 160, 221),
     "SOMA": (250, 200, 200),
 }
@@ -99,7 +112,7 @@ JOINT_HIGHLIGHT_COLOR = (255, 210, 35)
 JOINT_MARKER_RADIUS = 0.025
 JOINT_HIGHLIGHT_RADIUS = 0.055
 HAND_JOINT_NAMES = ("thumb", "index", "middle", "ring", "pinky")
-CANONICAL_POSE_MODELS = ("SMPL", "SMPLH", "SMPLX", "ANNY", "MHR", "SOMA")
+CANONICAL_POSE_MODELS = ("SMPL", "SMPLH", "SMPLX", "ANNY", "Garment", "MHR", "SOMA")
 
 
 @dataclass
@@ -321,6 +334,19 @@ def add_model_controls(server: viser.ViserServer, name: str, state: ModelState) 
             with server.gui.add_folder("Expression"):
                 handles += betas(server, state, key="expression", count=15, prefix="expr", lo=-2.0, hi=2.0)
 
+        elif name == "Garment":
+            assert isinstance(state.model, GarmentMeasurements)
+            with server.gui.add_folder("Shape"):
+                handles += betas(server, state, key="shape", count=min(10, state.model.num_shape_components))
+            with server.gui.add_folder("Body Pose"):
+                handles += joint_xyz(
+                    server,
+                    state,
+                    key="body_pose",
+                    joints=GARMENT_BODY_POSE_JOINTS,
+                    max_joints=state.params["body_pose"].shape[0],
+                )
+
         elif name == "SOMA":
             assert isinstance(state.model, SOMA)
             identity_default = float(state.params["identity"][0])
@@ -493,6 +519,7 @@ def load_models() -> dict[str, BodyModel]:
         ("SMPLH", lambda: SMPLH(gender="neutral")),
         ("SMPLX", lambda: SMPLX(gender="neutral")),
         ("ANNY", ANNY),
+        ("Garment", GarmentMeasurements),
         ("MHR", MHR),
         ("SOMA", lambda: SOMA(cache_identity=True, kernel="scipy")),
     )
