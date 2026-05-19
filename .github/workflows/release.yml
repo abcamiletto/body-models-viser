@@ -1,4 +1,4 @@
-name: publish
+name: release
 
 on:
   release:
@@ -6,10 +6,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Install uv
@@ -34,7 +35,4 @@ jobs:
       - name: Build package
         run: uv build
       - name: Publish to PyPI
-        env:
-          UV_PUBLISH_USERNAME: ${{ secrets.PYPI_USERNAME }}
-          UV_PUBLISH_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
         run: uv publish
