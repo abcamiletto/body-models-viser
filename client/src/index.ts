@@ -74,11 +74,7 @@ export function installViserRuntime(): void {
     return;
   }
 
-  const windowRef = window as Window & {
-    __BODY_MODELS_VISER__?: BodyModelsViserRuntime;
-  };
-  windowRef.__BODY_MODELS_VISER__?.dispose();
-  windowRef.__BODY_MODELS_VISER__ = new BodyModelsViserRuntime();
+  runtimeWindow().__BODY_MODELS_VISER__ ??= new BodyModelsViserRuntime();
 }
 
 class BodyModelsViserRuntime {
@@ -262,6 +258,10 @@ function isViewerLike(value: unknown): value is ViewerLike {
   }
   const candidate = value as Partial<ViewerLike>;
   return Array.isArray(candidate.mutable?.current?.messageQueue);
+}
+
+function runtimeWindow(): Window & { __BODY_MODELS_VISER__?: BodyModelsViserRuntime } {
+  return window as Window & { __BODY_MODELS_VISER__?: BodyModelsViserRuntime };
 }
 
 installViserRuntime();
