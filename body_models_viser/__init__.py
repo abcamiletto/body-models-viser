@@ -3,13 +3,15 @@ from __future__ import annotations
 from importlib.resources import files
 from pathlib import Path
 
-from ._viser import MhrBodyHandle, SmplBodyHandle, ViserBodyHandle, add_body_model
+from ._viser import AnnyBodyHandle, MhrBodyHandle, SmplBodyHandle, SomaBodyHandle, ViserBodyHandle, add_body_model
 
 __version__ = "0.1.0"
 
 __all__ = [
+    "AnnyBodyHandle",
     "MhrBodyHandle",
     "SmplBodyHandle",
+    "SomaBodyHandle",
     "ViserBodyHandle",
     "add_body_model",
     "client_path",
