@@ -7,8 +7,12 @@ name = "body-models-viser"
 version = "0.1.0"
 description = "Browser-side body model evaluation for viser"
 readme = "README.md"
-requires-python = ">=3.10"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+  "body-models",
+  "numpy",
+  "viser",
+]
 
 [tool.hatch.build]
 ignore-vcs = true
@@ -24,10 +28,10 @@ exclude = [
 only-include = [
   "body_models_viser",
   "client/dist/body-models-viser.js",
+  "client/schema/skinning.schema.json",
   "client/src",
   "client/package.json",
   "client/package-lock.json",
-  "scripts/generate_typescript_types.py",
   "README.md",
 ]
 

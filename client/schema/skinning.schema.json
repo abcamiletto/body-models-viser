@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://body-models-viser.local/skinning.schema.json",
+  "title": "SkinningInput",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["vertices", "skinWeights", "skinJoints", "boneTransforms"],
+  "properties": {
+    "vertices": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Vec3" }
+    },
+    "skinWeights": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "number" }
+      }
+    },
+    "skinJoints": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "boneTransforms": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Mat4" }
+    }
+  },
+  "$defs": {
+    "Vec3": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": { "type": "number" }
+    },
+    "Mat4": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "array",
+        "minItems": 4,
+        "maxItems": 4,
+        "items": { "type": "number" }
+      }
+    }
+  }
+}
