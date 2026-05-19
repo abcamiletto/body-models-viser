@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from body_models.mhr.backends import core as mhr_core
+from body_models.mhr.pose import pack_pose
+from body_models.smpl.backends.core import forward_unskinned_vertices as smpl_unskinned_vertices
+from nanomanifold import SO3
 from viser import _messages
 
 
@@ -263,18 +267,88 @@ def _runtime_source() -> str:
 
 
 def _skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
-    vertices = _unskinned_vertices(model, pose)
-    bone_transforms = _as_unbatched_array(model.forward_skeleton(**pose))
-    return vertices, bone_transforms
+    model_name = model.__class__.__name__.lower()
+    if model_name == "smpl":
+        return _smpl_skinning_state(model, pose)
+    if model_name == "mhr":
+        return _mhr_skinning_state(model, pose)
+    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
-def _unskinned_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
-    vertices = np.asarray(model.rest_vertices, dtype=np.float32)
-    shape = pose.get("shape")
-    if shape is not None and hasattr(model, "shapedirs"):
-        shape = _as_unbatched_array(shape)
-        vertices = vertices + np.einsum("s,vcs->vc", shape, model.shapedirs[..., : shape.shape[-1]])
-    return vertices
+def _smpl_skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    vertices, joints, _ = smpl_unskinned_vertices(
+        v_template=model.weights.v_template,
+        shapedirs=model.weights.shapedirs,
+        posedirs=model.weights.posedirs,
+        j_template=model.weights.j_template,
+        j_shapedirs=model.weights.j_shapedirs,
+        parents=model.weights.parents,
+        kinematic_fronts=model.weights.kinematic_fronts,
+        shape=pose["shape"],
+        body_pose=pose["body_pose"],
+        pelvis_rotation=pose.get("pelvis_rotation"),
+        rotation_type=model.rotation_type,
+        xp=np,
+    )
+    skeleton = model.forward_skeleton(**pose)
+    return _as_unbatched_array(vertices), _smpl_lbs_transforms(skeleton, joints)
+
+
+def _smpl_lbs_transforms(skeleton: np.ndarray, joints: np.ndarray) -> np.ndarray:
+    skeleton = _as_unbatched_array(skeleton)
+    joints = _as_unbatched_array(joints)
+    transforms = np.repeat(np.eye(4, dtype=np.float32)[None], skeleton.shape[0], axis=0)
+    transforms[:, :3, :3] = skeleton[:, :3, :3]
+    transforms[:, :3, 3] = skeleton[:, :3, 3] - np.einsum("jkl,jl->jk", skeleton[:, :3, :3], joints)
+    return transforms
+
+
+def _mhr_skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    weights = model.weights
+    packed_pose = pack_pose(np, pose["body_pose"], pose["hand_pose"])
+    expression = pose.get("expression")
+    if expression is None:
+        expression = np.zeros((*packed_pose.shape[:-1], model.EXPR_DIM), dtype=packed_pose.dtype)
+
+    t_g, r_g, s_g, joint_params = mhr_core._forward_skeleton_core(
+        xp=np,
+        pose=packed_pose,
+        joint_offsets=weights.joint_offsets,
+        joint_pre_rotations=weights.joint_pre_rotations,
+        parameter_transform=weights.parameter_transform,
+        kinematic_fronts=weights.kinematic_fronts,
+        num_joints=model.num_joints,
+        shape_dim=model.SHAPE_DIM,
+    )
+    shape = np.broadcast_to(pose["shape"], (*packed_pose.shape[:-1], pose["shape"].shape[-1]))
+    coeffs = np.concatenate([shape, expression], axis=-1)
+    vertices = weights.base_vertices + np.einsum("...i,ivk->...vk", coeffs, weights.blendshape_dirs)
+    vertices = vertices + mhr_core.apply_pose_correctives(joint_params, weights.corrective_W1, weights.corrective_W2, xp=np)
+
+    lin_g = r_g * s_g[..., None]
+    transforms = np.repeat(np.eye(4, dtype=np.float32)[None, None], model.num_joints, axis=1)
+    transforms[..., :3, :3] = 0.01 * np.einsum("...jik,jkl->...jil", lin_g, weights.bind_inv_linear)
+    transforms[..., :3, 3] = 0.01 * (
+        np.einsum("...jik,jk->...ji", lin_g, weights.bind_inv_translation) + t_g
+    )
+    transforms = _apply_global_transform(transforms, pose.get("global_rotation"), pose.get("global_translation"))
+    return _as_unbatched_array(vertices), _as_unbatched_array(transforms)
+
+
+def _apply_global_transform(
+    transforms: np.ndarray,
+    rotation: np.ndarray | None,
+    translation: np.ndarray | None,
+) -> np.ndarray:
+    if rotation is None and translation is None:
+        return transforms
+
+    global_transform = np.eye(4, dtype=np.float32)
+    if rotation is not None:
+        global_transform[:3, :3] = _as_unbatched_array(SO3.conversions.from_axis_angle_to_rotmat(rotation, xp=np))
+    if translation is not None:
+        global_transform[:3, 3] = _as_unbatched_array(translation)
+    return np.einsum("ij,...jk->...ik", global_transform, transforms)
 
 
 def _as_unbatched_array(value: Any) -> np.ndarray:
