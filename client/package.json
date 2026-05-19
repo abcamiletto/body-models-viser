@@ -1,0 +1,25 @@
+{
+  "name": "@body-models/viser-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/body-models-viser.js",
+  "module": "./dist/body-models-viser.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/body-models-viser.js"
+    }
+  },
+  "scripts": {
+    "generate-types": "uv run --no-project ../scripts/generate_typescript_types.py",
+    "build": "npm run generate-types && esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=dist/body-models-viser.js && tsc --emitDeclarationOnly",
+    "test": "npm run build && esbuild test/body-models-viser.test.ts --bundle --platform=node --format=esm --target=es2022 --outfile=dist/body-models-viser.test.mjs && node --test dist/body-models-viser.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3"
+  }
+}
