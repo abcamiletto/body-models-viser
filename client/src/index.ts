@@ -41,10 +41,6 @@ type ViewerLike = {
   };
 };
 
-type BodyModelState = {
-  create: BodyModelMeshMessage;
-};
-
 export function skinVertices(input: SkinningInput): Vec3[] {
   const out: Vec3[] = [];
   for (let vertex = 0; vertex < input.vertices.length; vertex++) {
@@ -87,7 +83,7 @@ export function installViserRuntime(): void {
 
 class BodyModelsViserRuntime {
   private viewer: ViewerLike | null = null;
-  private states = new Map<string, BodyModelState>();
+  private meshes = new Map<string, BodyModelMeshMessage>();
   private undoQueueIngress: (() => void) | null = null;
   private disposed = false;
 
@@ -97,7 +93,7 @@ class BodyModelsViserRuntime {
 
   dispose(): void {
     this.disposed = true;
-    this.states.clear();
+    this.meshes.clear();
     this.undoQueueIngress?.();
     this.undoQueueIngress = null;
     this.viewer = null;
@@ -111,14 +107,7 @@ class BodyModelsViserRuntime {
       const queue = this.getViewer().mutable.current.messageQueue;
       const push = queue.push.bind(queue);
       const wrappedPush = (...messages: RuntimeMessage[]): number => {
-        const forwarded: RuntimeMessage[] = [];
-        for (const message of messages) {
-          const handled = this.handleMessage(message, forwarded);
-          if (!handled) {
-            forwarded.push(message);
-          }
-        }
-        return push(...forwarded);
+        return push(...this.consume(messages));
       };
       queue.push = wrappedPush;
       this.undoQueueIngress = () => {
@@ -140,32 +129,35 @@ class BodyModelsViserRuntime {
   }
 
   private drainPending(queue: RuntimeMessage[]): void {
-    const forwarded: RuntimeMessage[] = [];
-    for (const message of queue.splice(0)) {
-      if (!this.handleMessage(message, forwarded)) {
-        forwarded.push(message);
-      }
-    }
-    queue.push(...forwarded);
+    queue.push(...this.consume(queue.splice(0)));
   }
 
-  private handleMessage(message: RuntimeMessage, out: RuntimeMessage[]): boolean {
-    if (isBodyModelMeshMessage(message)) {
-      this.states.set(message.name, { create: message });
-      out.push(this.meshMessage(message, message.vertices, message.boneTransforms));
-      return true;
-    }
-    if (isBodyModelPoseMessage(message)) {
-      const state = this.states.get(message.name);
-      if (!state) {
-        throw new Error(`Body model ${message.name} has not been created.`);
+  private consume(messages: RuntimeMessage[]): RuntimeMessage[] {
+    const out: RuntimeMessage[] = [];
+    for (const message of messages) {
+      switch (message.type) {
+        case "BodyModelMeshMessage": {
+          const mesh = message as BodyModelMeshMessage;
+          this.meshes.set(mesh.name, mesh);
+          out.push(this.meshMessage(mesh, mesh.vertices, mesh.boneTransforms));
+          break;
+        }
+        case "BodyModelPoseMessage": {
+          const pose = message as BodyModelPoseMessage;
+          const mesh = this.meshes.get(pose.name);
+          if (!mesh) {
+            throw new Error(`Body model ${pose.name} has not been created.`);
+          }
+          mesh.vertices = pose.vertices;
+          mesh.boneTransforms = pose.boneTransforms;
+          out.push(this.meshMessage(mesh, pose.vertices, pose.boneTransforms));
+          break;
+        }
+        default:
+          out.push(message);
       }
-      state.create.vertices = message.vertices;
-      state.create.boneTransforms = message.boneTransforms;
-      out.push(this.meshMessage(state.create, message.vertices, message.boneTransforms));
-      return true;
     }
-    return false;
+    return out;
   }
 
   private meshMessage(
@@ -173,6 +165,12 @@ class BodyModelsViserRuntime {
     vertices: Vec3[],
     boneTransforms: Mat4[],
   ): RuntimeMessage {
+    const skinningLengthMismatch =
+      vertices.length !== message.skinWeights.length ||
+      vertices.length !== message.skinJoints.length;
+    if (skinningLengthMismatch) {
+      throw new Error(`Body model ${message.name} has inconsistent vertex skinning data.`);
+    }
     const skinned = skinVertices({
       vertices,
       skinWeights: message.skinWeights,
@@ -219,14 +217,6 @@ function flattenUint32(values: Vec3[]): Uint32Array {
     out[3 * i + 2] = value[2];
   }
   return out;
-}
-
-function isBodyModelMeshMessage(message: RuntimeMessage): message is BodyModelMeshMessage {
-  return message.type === "BodyModelMeshMessage";
-}
-
-function isBodyModelPoseMessage(message: RuntimeMessage): message is BodyModelPoseMessage {
-  return message.type === "BodyModelPoseMessage";
 }
 
 type ReactFiberNode = {

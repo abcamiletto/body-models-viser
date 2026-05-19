@@ -67,7 +67,8 @@ class ViserBodyHandle:
         value = np.asarray(value)
         assert value.shape == (4,)
         self._wxyz = value.astype(float, copy=True)
-        _queue(self.scene, _messages.SetOrientationMessage(self.name, tuple(self._wxyz)))
+        message = _messages.SetOrientationMessage(self.name, tuple(self._wxyz))
+        self.scene._websock_interface.queue_message(message)
 
     @property
     def position(self) -> np.ndarray:
@@ -78,7 +79,8 @@ class ViserBodyHandle:
         value = np.asarray(value)
         assert value.shape == (3,)
         self._position = value.astype(float, copy=True)
-        _queue(self.scene, _messages.SetPositionMessage(self.name, tuple(self._position)))
+        message = _messages.SetPositionMessage(self.name, tuple(self._position))
+        self.scene._websock_interface.queue_message(message)
 
     @property
     def visible(self) -> bool:
@@ -87,7 +89,8 @@ class ViserBodyHandle:
     @visible.setter
     def visible(self, value: bool) -> None:
         self._visible = bool(value)
-        _queue(self.scene, _messages.SetSceneNodeVisibilityMessage(self.name, self._visible))
+        message = _messages.SetSceneNodeVisibilityMessage(self.name, self._visible)
+        self.scene._websock_interface.queue_message(message)
 
     @property
     def shape(self) -> np.ndarray:
@@ -166,7 +169,7 @@ class ViserBodyHandle:
             self._apply_pose()
 
     def remove(self) -> None:
-        _queue(self.scene, _messages.RemoveSceneNodeMessage(self.name))
+        self.scene._websock_interface.queue_message(_messages.RemoveSceneNodeMessage(self.name))
 
     def _param(self, name: str) -> np.ndarray:
         assert name in self.pose, f"{self.model_name} does not support {name!r}."
@@ -174,12 +177,11 @@ class ViserBodyHandle:
 
     def _apply_pose(self) -> None:
         vertices, bone_transforms = _skinning_state(self.model, self.pose)
-        _queue(
-            self.scene,
+        self.scene._websock_interface.queue_message(
             BodyModelPoseMessage(
                 self.name,
-                _float_rows(vertices),
-                _float_matrices(bone_transforms),
+                np.asarray(vertices, dtype=np.float32).tolist(),
+                np.asarray(bone_transforms, dtype=np.float32).tolist(),
             ),
         )
 
@@ -215,15 +217,14 @@ def add_body_model(
     _install_runtime(scene)
     vertices, bone_transforms = _skinning_state(model, pose)
     skin_weights, skin_joints = _sparse_skinning(model)
-    _queue(
-        scene,
+    scene._websock_interface.queue_message(
         BodyModelMeshMessage(
             name=name,
-            vertices=_float_rows(vertices),
-            faces=_int_rows(_triangular_faces(model)),
-            skinWeights=_float_rows(skin_weights),
-            skinJoints=_int_rows(skin_joints),
-            boneTransforms=_float_matrices(bone_transforms),
+            vertices=np.asarray(vertices, dtype=np.float32).tolist(),
+            faces=np.asarray(_triangular_faces(model), dtype=np.int32).tolist(),
+            skinWeights=np.asarray(skin_weights, dtype=np.float32).tolist(),
+            skinJoints=np.asarray(skin_joints, dtype=np.int32).tolist(),
+            boneTransforms=np.asarray(bone_transforms, dtype=np.float32).tolist(),
             color=color,
             wireframe=wireframe,
             opacity=opacity,
@@ -249,19 +250,16 @@ def _handle_type(model: Any) -> type[ViserBodyHandle]:
 
 
 def _install_runtime(scene: Any) -> None:
-    _queue(scene, _messages.RunJavascriptMessage(_runtime_source()))
+    scene._websock_interface.queue_message(_messages.RunJavascriptMessage(_runtime_source()))
 
 
 def _runtime_source() -> str:
     packaged = files(__package__) / "client" / "body-models-viser.js"
     if packaged.is_file():
         return packaged.read_text()
-    source_path = Path(__file__).resolve().parents[1] / "client" / "dist" / "body-models-viser.js"
-    return source_path.read_text()
 
-
-def _queue(scene: Any, message: _messages.Message) -> None:
-    scene._websock_interface.queue_message(message)
+    development = Path(__file__).resolve().parents[1] / "client" / "dist" / "body-models-viser.js"
+    return development.read_text()
 
 
 def _skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
@@ -313,15 +311,3 @@ def _sparse_skinning(model: Any) -> tuple[np.ndarray, np.ndarray]:
         joints_out[vertex, : len(joints)] = joints
         weights_out[vertex, : len(weights)] = weights
     return weights_out, joints_out
-
-
-def _float_rows(value: np.ndarray) -> list[list[float]]:
-    return np.asarray(value, dtype=np.float32).tolist()
-
-
-def _int_rows(value: np.ndarray) -> list[list[int]]:
-    return np.asarray(value, dtype=np.int32).tolist()
-
-
-def _float_matrices(value: np.ndarray) -> list[list[list[float]]]:
-    return np.asarray(value, dtype=np.float32).tolist()
