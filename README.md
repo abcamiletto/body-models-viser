@@ -141,9 +141,8 @@ GitHub Actions runs three checks:
 
 The JavaScript bundle in `client/dist/` is not tracked by git. Releases build it
 in GitHub Actions, package it into the Python wheel under
-`body_models_viser/client/body-models-viser.js`, and publish with `uv publish`.
-Configure `PYPI_USERNAME` and `PYPI_PASSWORD` repository secrets before creating
-a GitHub release or running the publish workflow manually.
+`body_models_viser/client/body-models-viser.js`, and publish with `uv publish`
+from `.github/workflows/release.yml` using PyPI trusted publishing.
 
 ## Notes
 
