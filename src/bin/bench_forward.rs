@@ -1,7 +1,8 @@
 use anyhow::Result;
 use body_models_viser::{
-    AnnyModel, AnnyParams, MhrModel, MhrParams, SmplModel, SmplParams, SomaModel, SomaParams,
-    anny_forward, load_json, mhr_forward, smpl_forward, soma_forward,
+    AnnyModel, AnnyParams, MhrModel, MhrParams, SmplModel, SmplParams, SmplhModel, SmplhParams,
+    SmplxModel, SmplxParams, SomaModel, SomaParams, anny_forward, load_json, mhr_forward,
+    smpl_forward, smplh_forward, smplx_forward, soma_forward,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -14,6 +15,16 @@ fn main() -> Result<()> {
     let smpl_fixture: body_models_viser::Fixture =
         load_json(&root.join("fixtures/smpl/shape_pose.json"))?;
     let smpl_params: SmplParams = serde_json::from_value(smpl_fixture.params)?;
+
+    let smplh_model: SmplhModel = load_json(&model_data.join("smplh.json"))?;
+    let smplh_fixture: body_models_viser::Fixture =
+        load_json(&root.join("fixtures/smplh/shape_pose.json"))?;
+    let smplh_params: SmplhParams = serde_json::from_value(smplh_fixture.params)?;
+
+    let smplx_model: SmplxModel = load_json(&model_data.join("smplx.json"))?;
+    let smplx_fixture: body_models_viser::Fixture =
+        load_json(&root.join("fixtures/smplx/shape_pose.json"))?;
+    let smplx_params: SmplxParams = serde_json::from_value(smplx_fixture.params)?;
 
     let mhr_model: MhrModel = load_json(&model_data.join("mhr.json"))?;
     let mhr_fixture: body_models_viser::Fixture =
@@ -31,6 +42,8 @@ fn main() -> Result<()> {
     let soma_params: SomaParams = serde_json::from_value(soma_fixture.params)?;
 
     time("smpl", 200, || smpl_forward(&smpl_model, &smpl_params))?;
+    time("smplh", 100, || smplh_forward(&smplh_model, &smplh_params))?;
+    time("smplx", 100, || smplx_forward(&smplx_model, &smplx_params))?;
     time("mhr", 50, || mhr_forward(&mhr_model, &mhr_params))?;
     time("anny", 20, || anny_forward(&anny_model, &anny_params))?;
     time("soma", 20, || soma_forward(&soma_model, &soma_params))?;

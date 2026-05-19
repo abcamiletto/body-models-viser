@@ -11,6 +11,8 @@ from body_models.anny.backends import core as anny_core
 from body_models.mhr.backends import core as mhr_core
 from body_models.mhr.pose import pack_pose
 from body_models.smpl.backends import core as smpl_core
+from body_models.smplh.backends import core as smplh_core
+from body_models.smplx.backends import core as smplx_core
 from body_models.soma import pose as soma_pose
 from body_models.soma.backends import core as soma_core
 from nanomanifold import SO3
@@ -22,12 +24,16 @@ _IDENTITY_PARAMS = {"gender", "age", "muscle", "weight", "height", "proportions"
 _BASE_VERTEX_PARAMS = {
     "anny": _IDENTITY_PARAMS,
     "smpl": {"shape"},
+    "smplh": {"shape"},
+    "smplx": {"shape", "expression"},
     "mhr": {"shape", "expression"},
     "soma": {"identity", "scale_params"},
 }
 _VERTEX_PARAMS = {
     "anny": _IDENTITY_PARAMS,
     "smpl": {"shape", "body_pose"},
+    "smplh": {"shape", "body_pose", "hand_pose"},
+    "smplx": {"shape", "body_pose", "hand_pose", "head_pose", "expression"},
     "mhr": {"shape", "body_pose", "hand_pose", "expression"},
     "soma": {"identity", "scale_params", "body_pose", "head_pose", "hand_pose", "global_rotation"},
 }
@@ -228,6 +234,14 @@ class SmplBodyHandle(ViserBodyHandle):
     pass
 
 
+class SmplhBodyHandle(ViserBodyHandle):
+    pass
+
+
+class SmplxBodyHandle(ViserBodyHandle):
+    pass
+
+
 class MhrBodyHandle(ViserBodyHandle):
     pass
 
@@ -243,6 +257,8 @@ class SomaBodyHandle(ViserBodyHandle):
 _HANDLE_TYPES.update({
     "anny": AnnyBodyHandle,
     "smpl": SmplBodyHandle,
+    "smplh": SmplhBodyHandle,
+    "smplx": SmplxBodyHandle,
     "mhr": MhrBodyHandle,
     "soma": SomaBodyHandle,
 })
@@ -322,8 +338,17 @@ def _base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     if model_name == "anny":
         return _anny_base_vertices(model, pose)
     if model_name == "smpl":
+        return _smpl_base_vertices(model, pose)
+    if model_name == "smplh":
+        return _smpl_base_vertices(model, pose)
+    if model_name == "smplx":
         shape = _as_unbatched_array(pose["shape"])
-        return model.weights.v_template + np.einsum("s,vcs->vc", shape, model.weights.shapedirs[..., : shape.shape[-1]])
+        expression = _as_unbatched_array(pose["expression"])
+        return model.weights.v_template + np.einsum(
+            "p,vcp->vc",
+            np.concatenate([shape, expression]),
+            np.concatenate([model.weights.shapedirs[..., : shape.shape[-1]], model.weights.exprdirs[..., : expression.shape[-1]]], axis=-1),
+        )
     if model_name == "mhr":
         expression = pose.get("expression")
         if expression is None:
@@ -341,6 +366,10 @@ def _vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray
         return base_vertices
     if model_name == "smpl":
         return _smpl_vertices(model, pose, base_vertices)
+    if model_name == "smplh":
+        return _smplh_vertices(model, pose, base_vertices)
+    if model_name == "smplx":
+        return _smplx_vertices(model, pose, base_vertices)
     if model_name == "mhr":
         return _mhr_vertices(model, pose, base_vertices)
     if model_name == "soma":
@@ -363,6 +392,46 @@ def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
             kinematic_fronts=model.weights.kinematic_fronts,
             shape=pose["shape"],
             body_pose=pose["body_pose"],
+            pelvis_rotation=pose.get("pelvis_rotation"),
+            skeleton_only=True,
+            rotation_type=model.rotation_type,
+        )
+        return _smpl_lbs_transforms(model.forward_skeleton(**pose), joints)
+    if model_name == "smplh":
+        _, joints, _, _ = smplh_core._forward_core(
+            xp=np,
+            v_template=None,
+            shapedirs=None,
+            j_template=model.weights.j_template,
+            j_shapedirs=model.weights.j_shapedirs,
+            parents=model.weights.parents,
+            kinematic_fronts=model.weights.kinematic_fronts,
+            hand_mean=model.weights.hand_mean,
+            shape=pose["shape"],
+            body_pose=pose["body_pose"],
+            hand_pose=pose["hand_pose"],
+            pelvis_rotation=pose.get("pelvis_rotation"),
+            skeleton_only=True,
+            rotation_type=model.rotation_type,
+        )
+        return _smpl_lbs_transforms(model.forward_skeleton(**pose), joints)
+    if model_name == "smplx":
+        _, joints, _, _ = smplx_core._forward_core(
+            xp=np,
+            v_template=None,
+            shapedirs=None,
+            exprdirs=None,
+            j_template=model.weights.j_template,
+            j_shapedirs=model.weights.j_shapedirs,
+            j_exprdirs=model.weights.j_exprdirs,
+            parents=model.weights.parents,
+            kinematic_fronts=model.weights.kinematic_fronts,
+            hand_mean=model.weights.hand_mean,
+            shape=pose["shape"],
+            expression=pose["expression"],
+            body_pose=pose["body_pose"],
+            hand_pose=pose["hand_pose"],
+            head_pose=pose["head_pose"],
             pelvis_rotation=pose.get("pelvis_rotation"),
             skeleton_only=True,
             rotation_type=model.rotation_type,
@@ -423,6 +492,11 @@ def _anny_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray
     return _apply_global_transform(transforms, pose.get("global_rotation"), pose.get("global_translation"))
 
 
+def _smpl_base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    shape = _as_unbatched_array(pose["shape"])
+    return model.weights.v_template + np.einsum("s,vcs->vc", shape, model.weights.shapedirs[..., : shape.shape[-1]])
+
+
 def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
     _, _, pose_matrices, _ = smpl_core._forward_core(
         xp=np,
@@ -434,6 +508,54 @@ def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.nd
         kinematic_fronts=model.weights.kinematic_fronts,
         shape=pose["shape"],
         body_pose=pose["body_pose"],
+        pelvis_rotation=pose.get("pelvis_rotation"),
+        skeleton_only=True,
+        rotation_type=model.rotation_type,
+    )
+    pose_delta = (pose_matrices[..., 1:, :, :] - np.eye(3, dtype=pose_matrices.dtype)).reshape(-1)
+    vertices = base_vertices + (pose_delta @ model.weights.posedirs).reshape(-1, 3)
+    return _as_unbatched_array(vertices)
+
+
+def _smplh_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    _, _, pose_matrices, _ = smplh_core._forward_core(
+        xp=np,
+        v_template=None,
+        shapedirs=None,
+        j_template=model.weights.j_template,
+        j_shapedirs=model.weights.j_shapedirs,
+        parents=model.weights.parents,
+        kinematic_fronts=model.weights.kinematic_fronts,
+        hand_mean=model.weights.hand_mean,
+        shape=pose["shape"],
+        body_pose=pose["body_pose"],
+        hand_pose=pose["hand_pose"],
+        pelvis_rotation=pose.get("pelvis_rotation"),
+        skeleton_only=True,
+        rotation_type=model.rotation_type,
+    )
+    pose_delta = (pose_matrices[..., 1:, :, :] - np.eye(3, dtype=pose_matrices.dtype)).reshape(-1)
+    vertices = base_vertices + (pose_delta @ model.weights.posedirs).reshape(-1, 3)
+    return _as_unbatched_array(vertices)
+
+
+def _smplx_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    _, _, pose_matrices, _ = smplx_core._forward_core(
+        xp=np,
+        v_template=None,
+        shapedirs=None,
+        exprdirs=None,
+        j_template=model.weights.j_template,
+        j_shapedirs=model.weights.j_shapedirs,
+        j_exprdirs=model.weights.j_exprdirs,
+        parents=model.weights.parents,
+        kinematic_fronts=model.weights.kinematic_fronts,
+        hand_mean=model.weights.hand_mean,
+        shape=pose["shape"],
+        expression=pose["expression"],
+        body_pose=pose["body_pose"],
+        hand_pose=pose["hand_pose"],
+        head_pose=pose["head_pose"],
         pelvis_rotation=pose.get("pelvis_rotation"),
         skeleton_only=True,
         rotation_type=model.rotation_type,

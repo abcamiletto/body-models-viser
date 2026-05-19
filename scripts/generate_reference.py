@@ -6,6 +6,8 @@ import numpy as np
 from body_models.anny.numpy import ANNY
 from body_models.mhr.numpy import MHR
 from body_models.smpl.numpy import SMPL
+from body_models.smplh.numpy import SMPLH
+from body_models.smplx.numpy import SMPLX
 from body_models.soma.pose import pack_pose as pack_soma_pose
 from body_models.soma.numpy import SOMA
 
@@ -55,6 +57,44 @@ if __name__ == "__main__":
         fixture = json.loads(fixture_path.read_text())
         params = {name: np.asarray(value, dtype=np.float32)[None] for name, value in fixture["params"].items()}
         dump_reference("smpl", fixture["case"], smpl.forward_skeleton(**params)[0], smpl.forward_vertices(**params)[0])
+
+    smplh = SMPLH(gender="neutral")
+    smplh_weights = smplh.weights
+    dump_model("smplh", {
+        "v_template": smplh_weights.v_template.tolist(),
+        "faces": smplh_weights.faces.tolist(),
+        "lbs_weights": smplh_weights.lbs_weights.tolist(),
+        "shapedirs": smplh_weights.shapedirs[:, :, :10].tolist(),
+        "posedirs": smplh_weights.posedirs.tolist(),
+        "j_template": smplh_weights.j_template.tolist(),
+        "j_shapedirs": smplh_weights.j_shapedirs[:, :, :10].tolist(),
+        "hand_mean": smplh_weights.hand_mean.tolist(),
+        "parents": smplh_weights.parents,
+    })
+    for fixture_path in sorted((ROOT / "fixtures" / "smplh").glob("*.json")):
+        fixture = json.loads(fixture_path.read_text())
+        params = {name: np.asarray(value, dtype=np.float32)[None] for name, value in fixture["params"].items()}
+        dump_reference("smplh", fixture["case"], smplh.forward_skeleton(**params)[0], smplh.forward_vertices(**params)[0])
+
+    smplx = SMPLX(gender="neutral")
+    smplx_weights = smplx.weights
+    dump_model("smplx", {
+        "v_template": smplx_weights.v_template.tolist(),
+        "faces": smplx_weights.faces.tolist(),
+        "lbs_weights": smplx_weights.lbs_weights.tolist(),
+        "shapedirs": smplx_weights.shapedirs[:, :, :10].tolist(),
+        "exprdirs": smplx_weights.exprdirs[:, :, :10].tolist(),
+        "posedirs": smplx_weights.posedirs.tolist(),
+        "j_template": smplx_weights.j_template.tolist(),
+        "j_shapedirs": smplx_weights.j_shapedirs[:, :, :10].tolist(),
+        "j_exprdirs": smplx_weights.j_exprdirs[:, :, :10].tolist(),
+        "hand_mean": smplx_weights.hand_mean.tolist(),
+        "parents": smplx_weights.parents,
+    })
+    for fixture_path in sorted((ROOT / "fixtures" / "smplx").glob("*.json")):
+        fixture = json.loads(fixture_path.read_text())
+        params = {name: np.asarray(value, dtype=np.float32)[None] for name, value in fixture["params"].items()}
+        dump_reference("smplx", fixture["case"], smplx.forward_skeleton(**params)[0], smplx.forward_vertices(**params)[0])
 
     mhr = MHR()
     mhr_weights = mhr.weights

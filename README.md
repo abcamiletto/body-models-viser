@@ -5,8 +5,8 @@
 viewer, without being limited by viser skinning constraints such as a fixed
 maximum number of bones per vertex.
 
-The package currently supports unbatched/default SMPL, MHR, ANNY, and SOMA
-models. The Rust implementation is checked against Python `body-models` output
+The package currently supports unbatched/default SMPL, SMPLH, SMPLX, MHR, ANNY,
+and SOMA models. The Rust implementation is checked against Python `body-models` output
 using JSON fixtures, and the Python wheel ships the JavaScript bundle that can
 be injected into a viser frontend.
 

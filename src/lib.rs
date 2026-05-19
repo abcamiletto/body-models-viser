@@ -12,7 +12,7 @@ use std::path::Path;
 
 pub use anny::anny_forward;
 pub use mhr::mhr_forward;
-pub use smpl::smpl_forward;
+pub use smpl::{smpl_forward, smplh_forward, smplx_forward};
 pub use soma::soma_forward;
 pub use types::*;
 
@@ -45,6 +45,16 @@ pub fn run_fixture(model_data_dir: &Path, fixture_path: &Path) -> Result<ModelOu
             let params = serde_json::from_value(params).context("parsing MHR fixture params")?;
             let model_data = load_json(&model_data_dir.join("mhr.json"))?;
             mhr_forward(&model_data, &params)?
+        }
+        "smplh" => {
+            let params = serde_json::from_value(params).context("parsing SMPLH fixture params")?;
+            let model_data = load_json(&model_data_dir.join("smplh.json"))?;
+            smplh_forward(&model_data, &params)?
+        }
+        "smplx" => {
+            let params = serde_json::from_value(params).context("parsing SMPLX fixture params")?;
+            let model_data = load_json(&model_data_dir.join("smplx.json"))?;
+            smplx_forward(&model_data, &params)?
         }
         "anny" => {
             let params = serde_json::from_value(params).context("parsing ANNY fixture params")?;

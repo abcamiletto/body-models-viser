@@ -20,6 +20,28 @@ pub struct SmplParams {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SmplhParams {
+    pub shape: Vec<f32>,
+    pub body_pose: Vec<Vec3>,
+    pub hand_pose: Vec<Vec3>,
+    pub pelvis_rotation: Vec3,
+    pub global_rotation: Vec3,
+    pub global_translation: Vec3,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SmplxParams {
+    pub shape: Vec<f32>,
+    pub body_pose: Vec<Vec3>,
+    pub hand_pose: Vec<Vec3>,
+    pub head_pose: Vec<Vec3>,
+    pub expression: Vec<f32>,
+    pub pelvis_rotation: Vec3,
+    pub global_rotation: Vec3,
+    pub global_translation: Vec3,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct MhrParams {
     pub shape: Vec<f32>,
     pub body_pose: Vec<f32>,
@@ -62,16 +84,26 @@ pub struct ModelOutput {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SmplModel {
+pub struct SmplFamilyModel {
     pub v_template: Vec<Vec3>,
     pub faces: Vec<[usize; 3]>,
     pub lbs_weights: Vec<Vec<f32>>,
     pub shapedirs: Vec<Mat3x10>,
+    #[serde(default)]
+    pub exprdirs: Vec<Vec<Vec<f32>>>,
     pub posedirs: Vec<Vec<f32>>,
     pub j_template: Vec<Vec3>,
     pub j_shapedirs: Vec<Mat3x10>,
+    #[serde(default)]
+    pub j_exprdirs: Vec<Vec<Vec<f32>>>,
+    #[serde(default)]
+    pub hand_mean: Vec<Vec<f32>>,
     pub parents: Vec<isize>,
 }
+
+pub type SmplModel = SmplFamilyModel;
+pub type SmplhModel = SmplFamilyModel;
+pub type SmplxModel = SmplFamilyModel;
 
 #[derive(Debug, Deserialize)]
 pub struct MhrModel {
