@@ -1,0 +1,14 @@
+[package]
+name = "body-models-viser"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[[bin]]
+name = "body-models-viser"
+path = "src/main.rs"
