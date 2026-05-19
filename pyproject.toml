@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "body-models-viser"
+version = "0.1.0"
+description = "Browser-side body model evaluation for viser"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.hatch.build]
+ignore-vcs = true
+exclude = [
+  "/client/node_modules",
+  "/client/src",
+  "/client/test",
+  "/generated",
+  "/target",
+]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+  "body_models_viser",
+  "client/dist/body-models-viser.js",
+  "client/src",
+  "client/package.json",
+  "client/package-lock.json",
+  "scripts/generate_typescript_types.py",
+  "README.md",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["body_models_viser"]
+force-include = { "client/dist/body-models-viser.js" = "body_models_viser/client/body-models-viser.js" }
