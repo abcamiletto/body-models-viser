@@ -1,3 +1,4 @@
+mod smpl;
 mod types;
 
 use anyhow::{Context, Result, bail};
@@ -5,6 +6,7 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
+pub use smpl::smpl_forward;
 pub use types::*;
 
 pub fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
@@ -13,8 +15,25 @@ pub fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
 }
 
 pub fn run_fixture(model_data_dir: &Path, fixture_path: &Path) -> Result<ModelOutput> {
-    let _ = model_data_dir;
-    let Fixture { model, case, .. } = load_json(fixture_path)?;
+    let Fixture {
+        model,
+        case,
+        params,
+    } = load_json(fixture_path)?;
 
-    bail!("unsupported fixture model {model:?} for case {case:?}")
+    let (skeleton, mesh) = match model.as_str() {
+        "smpl" => {
+            let params = serde_json::from_value(params).context("parsing SMPL fixture params")?;
+            let model_data = load_json(&model_data_dir.join("smpl.json"))?;
+            smpl_forward(&model_data, &params)?
+        }
+        model => bail!("unsupported fixture model {model:?}"),
+    };
+
+    Ok(ModelOutput {
+        model,
+        case,
+        skeleton,
+        mesh,
+    })
 }
