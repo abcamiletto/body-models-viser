@@ -7,10 +7,11 @@ name = "body-models-viser"
 version = "0.1.0"
 description = "Browser-side body model evaluation for viser"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
   "body-models",
   "numpy",
+  "viser",
 ]
 
 [tool.hatch.build]

@@ -1,52 +1,93 @@
 from __future__ import annotations
 
+import dataclasses
+from importlib.resources import files
+from pathlib import Path
 from typing import Any
 
 import numpy as np
+from viser import _messages
+
+
+@dataclasses.dataclass
+class BodyModelMeshMessage(_messages.Message, include_in_scene_serialization=True):
+    name: str
+    vertices: list[list[float]]
+    faces: list[list[int]]
+    skinWeights: list[list[float]]
+    skinJoints: list[list[int]]
+    boneTransforms: list[list[list[float]]]
+    color: tuple[int, int, int]
+    wireframe: bool
+    opacity: float | None
+    flatShading: bool
+    side: str
+    material: str
+    scale: float | tuple[float, float, float]
+    castShadow: bool
+    receiveShadow: bool | float
+
+
+@dataclasses.dataclass
+class BodyModelPoseMessage(_messages.Message, include_in_scene_serialization=True):
+    name: str
+    vertices: list[list[float]]
+    boneTransforms: list[list[list[float]]]
 
 
 class ViserBodyHandle:
-    """Non-rigid body model rendered as a full vertex mesh."""
+    """Non-rigid body model driven by the body-models-viser browser runtime."""
 
-    def __init__(self, model: Any, pose: dict[str, np.ndarray], root_frame: Any, mesh: Any) -> None:
+    def __init__(
+        self,
+        scene: Any,
+        name: str,
+        model: Any,
+        pose: dict[str, np.ndarray],
+    ) -> None:
+        self.scene = scene
+        self._name = name
         self.model = model
         self.model_name = model.__class__.__name__
         self.pose = pose
-        self.root_frame = root_frame
-        self.mesh = mesh
+        self._wxyz = np.array([1.0, 0.0, 0.0, 0.0])
+        self._position = np.zeros(3)
+        self._visible = True
 
     @property
     def name(self) -> str:
-        return self.root_frame.name
+        return self._name
 
     @property
     def wxyz(self) -> np.ndarray:
-        return self.root_frame.wxyz
+        return self._wxyz
 
     @wxyz.setter
     def wxyz(self, value: tuple[float, float, float, float] | np.ndarray) -> None:
         value = np.asarray(value)
         assert value.shape == (4,)
-        self.root_frame.wxyz = value
+        self._wxyz = value.astype(float, copy=True)
+        _queue(self.scene, _messages.SetOrientationMessage(self.name, tuple(self._wxyz)))
 
     @property
     def position(self) -> np.ndarray:
-        return self.root_frame.position
+        return self._position
 
     @position.setter
     def position(self, value: tuple[float, float, float] | np.ndarray) -> None:
         value = np.asarray(value)
         assert value.shape == (3,)
-        self.root_frame.position = value
+        self._position = value.astype(float, copy=True)
+        _queue(self.scene, _messages.SetPositionMessage(self.name, tuple(self._position)))
 
     @property
     def visible(self) -> bool:
-        return self.root_frame.visible
+        return self._visible
 
     @visible.setter
     def visible(self, value: bool) -> None:
-        self.root_frame.visible = value
-        self.mesh.visible = value
+        self._visible = bool(value)
+        _queue(self.scene, _messages.SetSceneNodeVisibilityMessage(self.name, self._visible))
 
     @property
     def shape(self) -> np.ndarray:
@@ -125,15 +166,22 @@ class ViserBodyHandle:
             self._apply_pose()
 
     def remove(self) -> None:
-        self.mesh.remove()
-        self.root_frame.remove()
+        _queue(self.scene, _messages.RemoveSceneNodeMessage(self.name))
 
     def _param(self, name: str) -> np.ndarray:
         assert name in self.pose, f"{self.model_name} does not support {name!r}."
         return self.pose[name]
 
     def _apply_pose(self) -> None:
-        self.mesh.vertices = _vertices(self.model, self.pose)
+        vertices, bone_transforms = _skinning_state(self.model, self.pose)
+        _queue(
+            self.scene,
+            BodyModelPoseMessage(
+                self.name,
+                _float_rows(vertices),
+                _float_matrices(bone_transforms),
+            ),
+        )
 
 
 class SmplBodyHandle(ViserBodyHandle):
@@ -149,22 +197,46 @@ def add_body_model(
     name: str,
     model: Any,
     *,
-    color: tuple[float, float, float] = (180, 180, 180),
+    color: tuple[int, int, int] = (180, 180, 180),
+    wireframe: bool = False,
+    opacity: float | None = None,
+    flat_shading: bool = False,
+    side: str = "front",
+    material: str = "standard",
+    scale: float | tuple[float, float, float] = 1.0,
+    cast_shadow: bool = True,
+    receive_shadow: bool | float = True,
 ) -> ViserBodyHandle:
     """Add a non-rigid SMPL or MHR body model to a viser scene."""
     if getattr(model, "is_rigid_body", False):
         raise ValueError("add_body_model() only supports non-rigid models.")
 
     pose = {key: np.asarray(value).copy() for key, value in model.get_rest_pose().items()}
-    root = scene.add_frame(name, show_axes=False)
-    mesh = scene.add_mesh_simple(
-        f"{name}/mesh",
-        vertices=_vertices(model, pose),
-        faces=_triangular_faces(model),
-        color=color,
+    _install_runtime(scene)
+    vertices, bone_transforms = _skinning_state(model, pose)
+    skin_weights, skin_joints = _sparse_skinning(model)
+    _queue(
+        scene,
+        BodyModelMeshMessage(
+            name=name,
+            vertices=_float_rows(vertices),
+            faces=_int_rows(_triangular_faces(model)),
+            skinWeights=_float_rows(skin_weights),
+            skinJoints=_int_rows(skin_joints),
+            boneTransforms=_float_matrices(bone_transforms),
+            color=color,
+            wireframe=wireframe,
+            opacity=opacity,
+            flatShading=flat_shading,
+            side=side,
+            material=material,
+            scale=scale,
+            castShadow=cast_shadow,
+            receiveShadow=receive_shadow,
+        ),
     )
     handle_type = _handle_type(model)
-    return handle_type(model, pose, root, mesh)
+    return handle_type(scene, name, model, pose)
 
 
 def _handle_type(model: Any) -> type[ViserBodyHandle]:
@@ -176,15 +248,42 @@ def _handle_type(model: Any) -> type[ViserBodyHandle]:
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
-def _vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
-    return _as_unbatched_array(model.forward_vertices(**pose))
+def _install_runtime(scene: Any) -> None:
+    _queue(scene, _messages.RunJavascriptMessage(_runtime_source()))
+
+
+def _runtime_source() -> str:
+    packaged = files(__package__) / "client" / "body-models-viser.js"
+    if packaged.is_file():
+        return packaged.read_text()
+    source_path = Path(__file__).resolve().parents[1] / "client" / "dist" / "body-models-viser.js"
+    return source_path.read_text()
+
+
+def _queue(scene: Any, message: _messages.Message) -> None:
+    scene._websock_interface.queue_message(message)
+
+
+def _skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    vertices = _unskinned_vertices(model, pose)
+    bone_transforms = _as_unbatched_array(model.forward_skeleton(**pose))
+    return vertices, bone_transforms
+
+
+def _unskinned_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    vertices = np.asarray(model.rest_vertices, dtype=np.float32)
+    shape = pose.get("shape")
+    if shape is not None and hasattr(model, "shapedirs"):
+        shape = _as_unbatched_array(shape)
+        vertices = vertices + np.einsum("s,vcs->vc", shape, model.shapedirs[..., : shape.shape[-1]])
+    return vertices
 
 
 def _as_unbatched_array(value: Any) -> np.ndarray:
     if hasattr(value, "detach"):
         value = value.detach().cpu().numpy()
     value = np.asarray(value)
-    return value[0] if value.ndim >= 3 and value.shape[0] == 1 else value
+    return value[0] if value.ndim >= 2 and value.shape[0] == 1 else value
 
 
 def _triangular_faces(model: Any) -> np.ndarray:
@@ -194,3 +293,35 @@ def _triangular_faces(model: Any) -> np.ndarray:
     if faces.shape[1] == 4:
         return np.concatenate([faces[:, [0, 1, 2]], faces[:, [0, 2, 3]]], axis=0)
     raise ValueError(f"Expected triangular or quad faces, got {faces.shape}.")
+
+
+def _sparse_skinning(model: Any) -> tuple[np.ndarray, np.ndarray]:
+    if hasattr(model.weights, "skin_indices") and hasattr(model.weights, "skin_weights"):
+        return model.weights.skin_weights, model.weights.skin_indices
+
+    dense = np.asarray(model.skin_weights)
+    skin_joints: list[np.ndarray] = []
+    skin_weights: list[np.ndarray] = []
+    for row in dense:
+        joints = np.flatnonzero(row)
+        skin_joints.append(joints)
+        skin_weights.append(row[joints])
+    max_len = max(len(row) for row in skin_joints)
+    joints_out = np.zeros((len(skin_joints), max_len), dtype=np.int32)
+    weights_out = np.zeros((len(skin_weights), max_len), dtype=np.float32)
+    for vertex, (joints, weights) in enumerate(zip(skin_joints, skin_weights)):
+        joints_out[vertex, : len(joints)] = joints
+        weights_out[vertex, : len(weights)] = weights
+    return weights_out, joints_out
+
+
+def _float_rows(value: np.ndarray) -> list[list[float]]:
+    return np.asarray(value, dtype=np.float32).tolist()
+
+
+def _int_rows(value: np.ndarray) -> list[list[int]]:
+    return np.asarray(value, dtype=np.int32).tolist()
+
+
+def _float_matrices(value: np.ndarray) -> list[list[list[float]]]:
+    return np.asarray(value, dtype=np.float32).tolist()

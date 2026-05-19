@@ -42,8 +42,11 @@ Rust loads the same fixture JSON as Python, evaluates the model, and emits:
 }
 ```
 
-The Python package exposes the viser-facing API. The browser bundle only handles
-the web-specific part: applying skinning with every supplied vertex weight.
+The Python package exposes the viser-facing API and injects the bundled browser
+runtime into viser. Python sends custom body-model messages with unskinned
+vertices, sparse weights, joint indices, and bone transforms. The browser
+runtime intercepts those messages, applies skinning with every supplied weight,
+and forwards a regular viser mesh message to the viewer.
 
 ## User Usage
 
@@ -71,8 +74,12 @@ handle = bmv.add_body_model(scene, "/body", SMPL(gender="neutral"))
 handle.body_pose = next_body_pose
 ```
 
-`client_path()` returns the packaged `body-models-viser.js` bundle. A browser
-integration can serve or inject this file, then call the exported skinning API:
+`add_body_model()` injects the browser runtime automatically. It does not call
+`scene.add_mesh_simple()` or `scene.add_mesh_skinned()`; the mesh sent to viser
+is produced by the runtime after browser-side skinning.
+
+`client_path()` returns the packaged `body-models-viser.js` bundle. Advanced
+browser integrations can import the same low-level skinning API directly:
 
 ```ts
 import { skinVertices } from "./body-models-viser.js";
