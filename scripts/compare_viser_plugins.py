@@ -13,6 +13,7 @@ from nanomanifold import SO3
 
 from body_models.anny.torch import ANNY
 from body_models.extras.viser_plugin import add_body_model
+from body_models.garment_measurements.torch import GarmentMeasurements
 from body_models.mhr.torch import MHR
 from body_models.smpl.torch import SMPL
 from body_models.soma.torch import SOMA
@@ -25,12 +26,17 @@ PYTHON_MODELS = {
     "mhr": lambda: MHR().eval(),
     "anny": lambda: ANNY().eval(),
     "soma": lambda: SOMA().eval(),
+    "garment": lambda: GarmentMeasurements().eval(),
 }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("smpl", "mhr", "anny", "soma", "all"), default="all")
+    parser.add_argument(
+        "--model",
+        choices=("smpl", "mhr", "anny", "soma", "garment", "all"),
+        default="all",
+    )
     parser.add_argument("--case", default="shape_pose", choices=("rest", "shape_pose", "translation"))
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
@@ -106,6 +112,19 @@ def soma_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
     return tensors(params, names)
 
 
+def garment_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
+    names = (
+        "shape",
+        "body_pose",
+        "head_pose",
+        "hand_pose",
+        "pelvis_rotation",
+        "global_rotation",
+        "global_translation",
+    )
+    return tensors(params, names)
+
+
 def run_rust_model(model_name: str, case: str) -> dict[str, Any]:
     binary = ROOT / "target" / "release" / "body-models-viser"
     result = subprocess.run(
@@ -129,6 +148,7 @@ def ensure_generated() -> None:
         ROOT / "generated" / "model_data" / "mhr.json",
         ROOT / "generated" / "model_data" / "anny.json",
         ROOT / "generated" / "model_data" / "soma.json",
+        ROOT / "generated" / "model_data" / "garment.json",
     ]
     if not all(path.exists() for path in required):
         raise FileNotFoundError("Run scripts/generate_reference.py before launching the comparison viewer.")
@@ -177,6 +197,12 @@ def dense_skin_weights(model_name: str, weights: dict[str, Any]) -> np.ndarray:
         rows, slots = np.where(valid)
         dense[rows, sparse_indices[rows, slots] - 1] = sparse_weights[rows, slots]
         return dense
+    if model_name == "garment":
+        sparse_weights = np.asarray(weights["skin_joint_weights"], dtype=np.float32)
+        sparse_indices = np.asarray(weights["skin_joint_indices"], dtype=np.int64)
+        dense = np.zeros((sparse_weights.shape[0], len(weights["parents"])), dtype=np.float32)
+        np.put_along_axis(dense, sparse_indices, sparse_weights, axis=1)
+        return dense
 
     sparse_weights = np.asarray(weights["skin_weights"], dtype=np.float32)
     sparse_indices = np.asarray(weights["skin_indices"], dtype=np.int64)
@@ -191,6 +217,7 @@ PARAMS = {
     "mhr": mhr_params,
     "anny": anny_params,
     "soma": soma_params,
+    "garment": garment_params,
 }
 
 

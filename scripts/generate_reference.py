@@ -8,6 +8,7 @@ from typing import Any
 import torch
 
 from body_models.anny.torch import ANNY
+from body_models.garment_measurements.torch import GarmentMeasurements
 from body_models.mhr.torch import MHR
 from body_models.smpl.torch import SMPL
 from body_models.soma.pose import pack_pose as pack_soma_pose
@@ -86,6 +87,19 @@ def soma_params(model: SOMA, fixture: dict[str, Any]) -> dict[str, torch.Tensor]
         "hand_pose": tensor2(params["hand_pose"], 48, 3, "SOMA hand_pose")[None],
         "global_rotation": tensor1(params["global_rotation"], 3, "SOMA global_rotation")[None],
         "global_translation": tensor1(params["global_translation"], 3, "SOMA global_translation")[None],
+    }
+
+
+def garment_params(model: GarmentMeasurements, fixture: dict[str, Any]) -> dict[str, torch.Tensor]:
+    params = fixture["params"]
+    return {
+        "shape": tensor1(params["shape"], model.num_shape_components, "GarmentMeasurements shape")[None],
+        "body_pose": tensor2(params["body_pose"], 25, 3, "GarmentMeasurements body_pose")[None],
+        "head_pose": tensor2(params["head_pose"], 3, 3, "GarmentMeasurements head_pose")[None],
+        "hand_pose": tensor2(params["hand_pose"], 30, 3, "GarmentMeasurements hand_pose")[None],
+        "pelvis_rotation": tensor1(params["pelvis_rotation"], 3, "GarmentMeasurements pelvis_rotation")[None],
+        "global_rotation": tensor1(params["global_rotation"], 3, "GarmentMeasurements global_rotation")[None],
+        "global_translation": tensor1(params["global_translation"], 3, "GarmentMeasurements global_translation")[None],
     }
 
 
@@ -237,14 +251,45 @@ def export_soma(root: Path, out: Path) -> None:
         )
 
 
+def export_garment(root: Path, out: Path) -> None:
+    model = GarmentMeasurements().eval()
+    weights = model.weights
+    write_json(
+        out / "model_data" / "garment.json",
+        {
+            "mean_vertices": weights.mean_vertices,
+            "components": weights.components,
+            "eigenvalues": weights.eigenvalues,
+            "bind_quats": weights.bind_quats,
+            "skin_joint_indices": weights.skin_joint_indices,
+            "skin_joint_weights": weights.skin_joint_weights,
+            "mvc_weights": weights.mvc_weights,
+            "faces": weights.faces,
+            "parents": weights.parents,
+        },
+    )
+    for fixture_path in sorted((root / "fixtures" / "garment").glob("*.json")):
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        params = garment_params(model, fixture)
+        write_json(
+            out / "reference" / "garment" / fixture_path.name,
+            {
+                "model": "garment",
+                "case": fixture["case"],
+                "skeleton": model.forward_skeleton(**params)[0],
+                "mesh": model.forward_vertices(**params)[0],
+            },
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("generated"))
     parser.add_argument(
         "--models",
         nargs="+",
-        choices=("smpl", "mhr", "anny", "soma"),
-        default=("smpl", "mhr", "anny", "soma"),
+        choices=("smpl", "mhr", "anny", "soma", "garment"),
+        default=("smpl", "mhr", "anny", "soma", "garment"),
     )
     args = parser.parse_args()
 
@@ -258,6 +303,8 @@ def main() -> None:
         export_anny(root, out)
     if "soma" in args.models:
         export_soma(root, out)
+    if "garment" in args.models:
+        export_garment(root, out)
 
 
 if __name__ == "__main__":

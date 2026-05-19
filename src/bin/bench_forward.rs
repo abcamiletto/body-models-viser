@@ -1,7 +1,7 @@
 use anyhow::Result;
 use body_models_viser::{
-    AnnyModel, MhrModel, Params, SmplModel, SomaModel, anny_forward, load_json, mhr_forward,
-    smpl_forward, soma_forward,
+    AnnyModel, GarmentModel, MhrModel, Params, SmplModel, SomaModel, anny_forward, garment_forward,
+    load_json, mhr_forward, smpl_forward, soma_forward,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -38,10 +38,20 @@ fn main() -> Result<()> {
         unreachable!();
     };
 
+    let garment_model: GarmentModel = load_json(&model_data.join("garment.json"))?;
+    let garment_fixture: body_models_viser::Fixture =
+        load_json(&root.join("fixtures/garment/shape_pose.json"))?;
+    let Params::Garment(garment_params) = garment_fixture.params else {
+        unreachable!();
+    };
+
     time("smpl", 200, || smpl_forward(&smpl_model, &smpl_params))?;
     time("mhr", 50, || mhr_forward(&mhr_model, &mhr_params))?;
     time("anny", 20, || anny_forward(&anny_model, &anny_params))?;
     time("soma", 20, || soma_forward(&soma_model, &soma_params))?;
+    time("garment", 20, || {
+        garment_forward(&garment_model, &garment_params)
+    })?;
 
     Ok(())
 }

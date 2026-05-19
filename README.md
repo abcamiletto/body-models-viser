@@ -5,10 +5,10 @@
 viewer, without being limited by viser skinning constraints such as a fixed
 maximum number of bones per vertex.
 
-The package currently supports unbatched/default SMPL, MHR, ANNY, and SOMA
-models. The Rust implementation is checked against Python `body-models` output
-using JSON fixtures, and the Python wheel ships the JavaScript bundle that can
-be injected into a viser frontend.
+The package currently supports unbatched/default SMPL, MHR, ANNY, SOMA, and
+GarmentMeasurements models. The Rust implementation is checked against Python
+`body-models` output using JSON fixtures, and the Python wheel ships the
+JavaScript bundle that can be injected into a viser frontend.
 
 ## Layout
 
@@ -134,7 +134,7 @@ Open the side-by-side viser comparison:
 
 ```sh
 uv run --project ../body-models --no-sync \
-  scripts/compare_viser_plugins.py --model both --case shape_pose
+  scripts/compare_viser_plugins.py --model all --case shape_pose
 ```
 
 ## CI And Releases

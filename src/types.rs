@@ -40,6 +40,7 @@ pub struct Fixture {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Params {
+    Garment(GarmentParams),
     Smpl(SmplParams),
     Mhr(MhrParams),
     Anny(AnnyParams),
@@ -85,6 +86,17 @@ pub struct SomaParams {
     pub body_pose: Vec<Vec3>,
     pub head_pose: Vec<Vec3>,
     pub hand_pose: Vec<Vec3>,
+    pub global_rotation: Vec3,
+    pub global_translation: Vec3,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GarmentParams {
+    pub shape: Vec<f64>,
+    pub body_pose: Vec<Vec3>,
+    pub head_pose: Vec<Vec3>,
+    pub hand_pose: Vec<Vec3>,
+    pub pelvis_rotation: Vec3,
     pub global_rotation: Vec3,
     pub global_translation: Vec3,
 }
@@ -174,3 +186,18 @@ pub struct SomaModel {
     pub faces: Vec<[usize; 3]>,
     pub parents: Vec<isize>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct GarmentModel {
+    pub mean_vertices: Vec<Vec3>,
+    pub components: Vec<Mat3x15>,
+    pub eigenvalues: Vec<f64>,
+    pub bind_quats: Vec<[f64; 4]>,
+    pub skin_joint_indices: Vec<Vec<usize>>,
+    pub skin_joint_weights: Vec<Vec<f64>>,
+    pub mvc_weights: Vec<Vec<f64>>,
+    pub faces: Vec<[usize; 3]>,
+    pub parents: Vec<isize>,
+}
+
+pub type Mat3x15 = [[f64; 15]; 3];

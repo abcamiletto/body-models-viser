@@ -1,4 +1,5 @@
 mod anny;
+mod garment;
 mod math;
 mod mhr;
 mod smpl;
@@ -11,6 +12,7 @@ use std::fs;
 use std::path::Path;
 
 pub use anny::anny_forward;
+pub use garment::garment_forward;
 pub use mhr::mhr_forward;
 pub use smpl::smpl_forward;
 pub use soma::soma_forward;
@@ -44,6 +46,10 @@ pub fn run_fixture(model_data_dir: &Path, fixture_path: &Path) -> Result<ModelOu
         ("soma", Params::Soma(params)) => {
             let model_data = load_json(&model_data_dir.join("soma.json"))?;
             soma::soma_forward(&model_data, &params)?
+        }
+        ("garment", Params::Garment(params)) => {
+            let model_data = load_json(&model_data_dir.join("garment.json"))?;
+            garment::garment_forward(&model_data, &params)?
         }
         (model, _) => bail!("unsupported or mismatched fixture model {model:?}"),
     };
