@@ -7,8 +7,11 @@ from typing import Any
 
 import torch
 
+from body_models.anny.torch import ANNY
 from body_models.mhr.torch import MHR
 from body_models.smpl.torch import SMPL
+from body_models.soma.pose import pack_pose as pack_soma_pose
+from body_models.soma.torch import SOMA
 
 
 def tensor1(values: list[float], size: int, name: str) -> torch.Tensor:
@@ -55,6 +58,34 @@ def mhr_params(model: MHR, fixture: dict[str, Any]) -> dict[str, torch.Tensor]:
         "expression": tensor1(params["expression"], model.EXPR_DIM, "MHR expression")[None],
         "global_rotation": tensor1(params["global_rotation"], 3, "MHR global_rotation")[None],
         "global_translation": tensor1(params["global_translation"], 3, "MHR global_translation")[None],
+    }
+
+
+def anny_params(model: ANNY, fixture: dict[str, Any]) -> dict[str, torch.Tensor]:
+    params = fixture["params"]
+    return {
+        "gender": tensor1([params["gender"]], 1, "ANNY gender"),
+        "age": tensor1([params["age"]], 1, "ANNY age"),
+        "muscle": tensor1([params["muscle"]], 1, "ANNY muscle"),
+        "weight": tensor1([params["weight"]], 1, "ANNY weight"),
+        "height": tensor1([params["height"]], 1, "ANNY height"),
+        "proportions": tensor1([params["proportions"]], 1, "ANNY proportions"),
+        "body_pose": tensor2(params["body_pose"], 64, 3, "ANNY body_pose")[None],
+        "head_pose": tensor2(params["head_pose"], 60, 3, "ANNY head_pose")[None],
+        "hand_pose": tensor2(params["hand_pose"], 38, 3, "ANNY hand_pose")[None],
+        "global_rotation": tensor1(params["global_rotation"], 3, "ANNY global_rotation")[None],
+        "global_translation": tensor1(params["global_translation"], 3, "ANNY global_translation")[None],
+    }
+
+
+def soma_params(model: SOMA, fixture: dict[str, Any]) -> dict[str, torch.Tensor]:
+    params = fixture["params"]
+    return {
+        "body_pose": tensor2(params["body_pose"], 23, 3, "SOMA body_pose")[None],
+        "head_pose": tensor2(params["head_pose"], 5, 3, "SOMA head_pose")[None],
+        "hand_pose": tensor2(params["hand_pose"], 48, 3, "SOMA hand_pose")[None],
+        "global_rotation": tensor1(params["global_rotation"], 3, "SOMA global_rotation")[None],
+        "global_translation": tensor1(params["global_translation"], 3, "SOMA global_translation")[None],
     }
 
 
@@ -128,10 +159,93 @@ def export_mhr(root: Path, out: Path) -> None:
         )
 
 
+def export_anny(root: Path, out: Path) -> None:
+    model = ANNY().eval()
+    weights = model.weights
+    write_json(
+        out / "model_data" / "anny.json",
+        {
+            "template_vertices": weights.template_vertices,
+            "blendshapes": weights.blendshapes,
+            "template_bone_heads": weights.template_bone_heads,
+            "template_bone_tails": weights.template_bone_tails,
+            "bone_heads_blendshapes": weights.bone_heads_blendshapes,
+            "bone_tails_blendshapes": weights.bone_tails_blendshapes,
+            "bone_rolls_rotmat": weights.bone_rolls_rotmat,
+            "phenotype_mask": weights.phenotype_mask,
+            "lbs_joint_indices": weights.lbs_joint_indices,
+            "lbs_joint_weights": weights.lbs_joint_weights,
+            "faces": weights.faces,
+            "parents": weights.parents,
+        },
+    )
+    for fixture_path in sorted((root / "fixtures" / "anny").glob("*.json")):
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        params = anny_params(model, fixture)
+        write_json(
+            out / "reference" / "anny" / fixture_path.name,
+            {
+                "model": "anny",
+                "case": fixture["case"],
+                "skeleton": model.forward_skeleton(**params)[0],
+                "mesh": model.forward_vertices(**params)[0],
+            },
+        )
+
+
+def export_soma(root: Path, out: Path) -> None:
+    model = SOMA().eval()
+    weights = model.weights
+    rest = model.get_rest_pose(dtype=weights.mean_active.dtype, hands="flat")
+    pose = pack_soma_pose(
+        torch,
+        rest["global_rotation"][None],
+        rest["body_pose"][None],
+        rest["head_pose"][None],
+        rest["hand_pose"][None],
+    )
+    prepared = model.prepare_identity(identity=rest["identity"][None], scale_params=None, pose=pose, cache=False)
+    write_json(
+        out / "model_data" / "soma.json",
+        {
+            "bind_shape_active": prepared.bind_shape_active[0],
+            "world_bind_pose": prepared.world_bind_pose[0],
+            "inverse_world_bind_pose": prepared.inverse_world_bind_pose[0],
+            "t_pose_world": weights.t_pose_world,
+            "corrective_bindpose": weights.correctives.corrective_bindpose,
+            "corrective_W1": weights.correctives.corrective_W1,
+            "corrective_W2_rows": weights.correctives.corrective_W2_rows,
+            "corrective_W2_cols": weights.correctives.corrective_W2_cols,
+            "corrective_W2_values": weights.correctives.corrective_W2_values,
+            "skin_joint_indices": weights.skin_joint_indices_active,
+            "skin_joint_weights": weights.skin_joint_weights_active,
+            "faces": weights.faces,
+            "parents": weights.topology.parents_full,
+        },
+    )
+    for fixture_path in sorted((root / "fixtures" / "soma").glob("*.json")):
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        params = soma_params(model, fixture)
+        write_json(
+            out / "reference" / "soma" / fixture_path.name,
+            {
+                "model": "soma",
+                "case": fixture["case"],
+                "skeleton": model.forward_skeleton(**params)[0],
+                "mesh": model.forward_vertices(**params)[0],
+            },
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path("generated"))
-    parser.add_argument("--models", nargs="+", choices=("smpl", "mhr"), default=("smpl", "mhr"))
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=("smpl", "mhr", "anny", "soma"),
+        default=("smpl", "mhr", "anny", "soma"),
+    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
@@ -140,6 +254,10 @@ def main() -> None:
         export_smpl(root, out)
     if "mhr" in args.models:
         export_mhr(root, out)
+    if "anny" in args.models:
+        export_anny(root, out)
+    if "soma" in args.models:
+        export_soma(root, out)
 
 
 if __name__ == "__main__":

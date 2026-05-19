@@ -11,9 +11,11 @@ import torch
 import viser
 from nanomanifold import SO3
 
+from body_models.anny.torch import ANNY
 from body_models.extras.viser_plugin import add_body_model
 from body_models.mhr.torch import MHR
 from body_models.smpl.torch import SMPL
+from body_models.soma.torch import SOMA
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,12 +23,14 @@ ROOT = Path(__file__).resolve().parents[1]
 PYTHON_MODELS = {
     "smpl": lambda: SMPL(gender="neutral").eval(),
     "mhr": lambda: MHR().eval(),
+    "anny": lambda: ANNY().eval(),
+    "soma": lambda: SOMA().eval(),
 }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=("smpl", "mhr", "both"), default="both")
+    parser.add_argument("--model", choices=("smpl", "mhr", "anny", "soma", "all"), default="all")
     parser.add_argument("--case", default="shape_pose", choices=("rest", "shape_pose", "translation"))
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
@@ -37,7 +41,7 @@ def main() -> None:
     server = viser.ViserServer(port=args.port)
     server.scene.add_grid("/ground", width=6.0, height=4.0)
 
-    names = ["smpl", "mhr"] if args.model == "both" else [args.model]
+    names = list(PYTHON_MODELS) if args.model == "all" else [args.model]
     for row, model_name in enumerate(names):
         add_comparison(server.scene, model_name, args.case, y=-1.1 * row)
 
@@ -80,6 +84,28 @@ def mhr_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
     return tensors(params, names)
 
 
+def anny_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
+    names = (
+        "gender",
+        "age",
+        "muscle",
+        "weight",
+        "height",
+        "proportions",
+        "body_pose",
+        "head_pose",
+        "hand_pose",
+        "global_rotation",
+        "global_translation",
+    )
+    return tensors(params, names)
+
+
+def soma_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
+    names = ("body_pose", "head_pose", "hand_pose", "global_rotation", "global_translation")
+    return tensors(params, names)
+
+
 def run_rust_model(model_name: str, case: str) -> dict[str, Any]:
     binary = ROOT / "target" / "release" / "body-models-viser"
     result = subprocess.run(
@@ -101,6 +127,8 @@ def ensure_generated() -> None:
     required = [
         ROOT / "generated" / "model_data" / "smpl.json",
         ROOT / "generated" / "model_data" / "mhr.json",
+        ROOT / "generated" / "model_data" / "anny.json",
+        ROOT / "generated" / "model_data" / "soma.json",
     ]
     if not all(path.exists() for path in required):
         raise FileNotFoundError("Run scripts/generate_reference.py before launching the comparison viewer.")
@@ -134,6 +162,21 @@ def bone_positions(skeleton: list[Any]) -> np.ndarray:
 def dense_skin_weights(model_name: str, weights: dict[str, Any]) -> np.ndarray:
     if model_name == "smpl":
         return np.asarray(weights["lbs_weights"], dtype=np.float32)
+    if model_name == "anny":
+        sparse_weights = np.asarray(weights["lbs_joint_weights"], dtype=np.float32)
+        sparse_indices = np.asarray(weights["lbs_joint_indices"], dtype=np.int64)
+        num_joints = len(weights["parents"])
+        dense = np.zeros((sparse_weights.shape[0], num_joints), dtype=np.float32)
+        np.put_along_axis(dense, sparse_indices, sparse_weights, axis=1)
+        return dense
+    if model_name == "soma":
+        sparse_weights = np.asarray(weights["skin_joint_weights"], dtype=np.float32)
+        sparse_indices = np.asarray(weights["skin_joint_indices"], dtype=np.int64)
+        dense = np.zeros((sparse_weights.shape[0], len(weights["parents"]) - 1), dtype=np.float32)
+        valid = sparse_indices > 0
+        rows, slots = np.where(valid)
+        dense[rows, sparse_indices[rows, slots] - 1] = sparse_weights[rows, slots]
+        return dense
 
     sparse_weights = np.asarray(weights["skin_weights"], dtype=np.float32)
     sparse_indices = np.asarray(weights["skin_indices"], dtype=np.int64)
@@ -146,6 +189,8 @@ def dense_skin_weights(model_name: str, weights: dict[str, Any]) -> np.ndarray:
 PARAMS = {
     "smpl": smpl_params,
     "mhr": mhr_params,
+    "anny": anny_params,
+    "soma": soma_params,
 }
 
 

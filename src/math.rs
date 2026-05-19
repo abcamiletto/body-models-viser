@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use glam::{DMat3, DMat4, DQuat, DVec3};
 use std::sync::OnceLock;
 
 use crate::types::{Mat3, Mat4, SparseRows, Vec3};
@@ -48,9 +49,10 @@ pub(crate) fn apply_global_skeleton(
 }
 
 pub(crate) fn apply_global_points(points: &mut [Vec3], rotation: Vec3, translation: Vec3) {
-    let r = axis_angle_to_mat3(rotation);
+    let r = to_dmat3(axis_angle_to_mat3(rotation));
+    let t = to_dvec3(translation);
     for point in points {
-        *point = add3(mat3_vec(r, *point), translation);
+        *point = from_dvec3(r * to_dvec3(*point) + t);
     }
 }
 
@@ -122,31 +124,15 @@ pub(crate) fn sparse_dot(rows: &SparseRows<f64>, row: usize, values: &[f64]) -> 
 }
 
 pub(crate) fn axis_angle_to_mat3(v: Vec3) -> Mat3 {
-    let theta = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    let axis_angle = to_dvec3(v);
+    let theta = axis_angle.length();
     if theta < 1e-12 {
         return eye3();
     }
-    let [x, y, z] = [v[0] / theta, v[1] / theta, v[2] / theta];
-    let c = theta.cos();
-    let s = theta.sin();
-    let one_c = 1.0 - c;
-    [
-        [
-            c + x * x * one_c,
-            x * y * one_c - z * s,
-            x * z * one_c + y * s,
-        ],
-        [
-            y * x * one_c + z * s,
-            c + y * y * one_c,
-            y * z * one_c - x * s,
-        ],
-        [
-            z * x * one_c - y * s,
-            z * y * one_c + x * s,
-            c + z * z * one_c,
-        ],
-    ]
+    from_dmat3(DMat3::from_quat(DQuat::from_axis_angle(
+        axis_angle / theta,
+        theta,
+    )))
 }
 
 pub(crate) fn euler_xyz_to_mat3(v: Vec3) -> Mat3 {
@@ -184,25 +170,9 @@ pub(crate) fn quat_mul_xyzw(a: [f64; 4], b: [f64; 4]) -> [f64; 4] {
 }
 
 pub(crate) fn quat_xyzw_to_mat3(q: [f64; 4]) -> Mat3 {
-    let norm = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
-    let [x, y, z, w] = [q[0] / norm, q[1] / norm, q[2] / norm, q[3] / norm];
-    [
-        [
-            1.0 - 2.0 * (y * y + z * z),
-            2.0 * (x * y - z * w),
-            2.0 * (x * z + y * w),
-        ],
-        [
-            2.0 * (x * y + z * w),
-            1.0 - 2.0 * (x * x + z * z),
-            2.0 * (y * z - x * w),
-        ],
-        [
-            2.0 * (x * z - y * w),
-            2.0 * (y * z + x * w),
-            1.0 - 2.0 * (x * x + y * y),
-        ],
-    ]
+    from_dmat3(DMat3::from_quat(
+        DQuat::from_xyzw(q[0], q[1], q[2], q[3]).normalize(),
+    ))
 }
 
 pub(crate) fn eye3() -> Mat3 {
@@ -216,6 +186,10 @@ pub(crate) fn rt_to_mat4(r: Mat3, t: Vec3) -> Mat4 {
         [r[2][0], r[2][1], r[2][2], t[2]],
         [0.0, 0.0, 0.0, 1.0],
     ]
+}
+
+pub(crate) fn invert_rigid(m: Mat4) -> Mat4 {
+    from_dmat4(to_dmat4(m).inverse())
 }
 
 pub(crate) fn trs_to_mat4(t: Vec3, r: Mat3, s: f64) -> Mat4 {
@@ -234,50 +208,82 @@ pub(crate) fn mat4_trans(m: &Mat4) -> Vec3 {
     [m[0][3], m[1][3], m[2][3]]
 }
 
-pub(crate) fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
-    let mut out = [[0.0; 3]; 3];
-    for i in 0..3 {
-        for j in 0..3 {
-            out[i][j] = (0..3).map(|k| a[i][k] * b[k][j]).sum();
-        }
-    }
-    out
+pub(crate) fn mat3_transpose(m: Mat3) -> Mat3 {
+    from_dmat3(to_dmat3(m).transpose())
 }
 
-fn mat4_mul(a: Mat4, b: Mat4) -> Mat4 {
-    let mut out = [[0.0; 4]; 4];
-    for i in 0..4 {
-        for j in 0..4 {
-            out[i][j] = (0..4).map(|k| a[i][k] * b[k][j]).sum();
-        }
-    }
-    out
+pub(crate) fn mat3_mul(a: Mat3, b: Mat3) -> Mat3 {
+    from_dmat3(to_dmat3(a) * to_dmat3(b))
+}
+
+pub(crate) fn mat4_mul(a: Mat4, b: Mat4) -> Mat4 {
+    from_dmat4(to_dmat4(a) * to_dmat4(b))
 }
 
 pub(crate) fn mat3_vec(m: Mat3, v: Vec3) -> Vec3 {
-    [
-        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
-        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
-        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
-    ]
+    from_dvec3(to_dmat3(m) * to_dvec3(v))
 }
 
 pub(crate) fn scale_mat3(m: Mat3, s: f64) -> Mat3 {
-    [
-        [m[0][0] * s, m[0][1] * s, m[0][2] * s],
-        [m[1][0] * s, m[1][1] * s, m[1][2] * s],
-        [m[2][0] * s, m[2][1] * s, m[2][2] * s],
-    ]
+    from_dmat3(to_dmat3(m) * s)
 }
 
 pub(crate) fn add3(a: Vec3, b: Vec3) -> Vec3 {
-    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+    from_dvec3(to_dvec3(a) + to_dvec3(b))
 }
 
 pub(crate) fn sub3(a: Vec3, b: Vec3) -> Vec3 {
-    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+    from_dvec3(to_dvec3(a) - to_dvec3(b))
 }
 
 pub(crate) fn scale3(a: Vec3, s: f64) -> Vec3 {
-    [a[0] * s, a[1] * s, a[2] * s]
+    from_dvec3(to_dvec3(a) * s)
+}
+
+pub(crate) fn cross3(a: Vec3, b: Vec3) -> Vec3 {
+    from_dvec3(to_dvec3(a).cross(to_dvec3(b)))
+}
+
+pub(crate) fn norm3(a: Vec3) -> f64 {
+    to_dvec3(a).length()
+}
+
+fn to_dvec3(v: Vec3) -> DVec3 {
+    DVec3::new(v[0], v[1], v[2])
+}
+
+fn from_dvec3(v: DVec3) -> Vec3 {
+    [v.x, v.y, v.z]
+}
+
+fn to_dmat3(m: Mat3) -> DMat3 {
+    DMat3::from_cols(
+        DVec3::new(m[0][0], m[1][0], m[2][0]),
+        DVec3::new(m[0][1], m[1][1], m[2][1]),
+        DVec3::new(m[0][2], m[1][2], m[2][2]),
+    )
+}
+
+fn from_dmat3(m: DMat3) -> Mat3 {
+    let x = m.x_axis;
+    let y = m.y_axis;
+    let z = m.z_axis;
+    [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]]
+}
+
+fn to_dmat4(m: Mat4) -> DMat4 {
+    DMat4::from_cols_array(&[
+        m[0][0], m[1][0], m[2][0], m[3][0], m[0][1], m[1][1], m[2][1], m[3][1], m[0][2], m[1][2],
+        m[2][2], m[3][2], m[0][3], m[1][3], m[2][3], m[3][3],
+    ])
+}
+
+fn from_dmat4(m: DMat4) -> Mat4 {
+    let a = m.to_cols_array();
+    [
+        [a[0], a[4], a[8], a[12]],
+        [a[1], a[5], a[9], a[13]],
+        [a[2], a[6], a[10], a[14]],
+        [a[3], a[7], a[11], a[15]],
+    ]
 }
