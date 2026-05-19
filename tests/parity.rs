@@ -63,10 +63,46 @@ fn smpl_matches_python_reference() -> Result<()> {
 }
 
 #[test]
+fn smplh_matches_python_reference() -> Result<()> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for name in ["rest", "shape_pose", "translation"] {
+        check_case(&root, "smplh", name, 5e-5)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn smplx_matches_python_reference() -> Result<()> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for name in ["rest", "shape_pose", "translation"] {
+        check_case(&root, "smplx", name, 5e-5)?;
+    }
+    Ok(())
+}
+
+#[test]
 fn mhr_matches_python_reference() -> Result<()> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     for name in ["rest", "shape_pose", "translation"] {
         check_case(&root, "mhr", name, 2e-4)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn anny_matches_python_reference() -> Result<()> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for name in ["rest", "shape_pose", "translation"] {
+        check_case(&root, "anny", name, 5e-4)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn soma_matches_python_reference() -> Result<()> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for name in ["rest", "shape_pose", "translation"] {
+        check_case(&root, "soma", name, 2e-3)?;
     }
     Ok(())
 }

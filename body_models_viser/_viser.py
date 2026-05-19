@@ -6,21 +6,36 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from body_models.anny import pose as anny_pose
+from body_models.anny.backends import core as anny_core
 from body_models.mhr.backends import core as mhr_core
 from body_models.mhr.pose import pack_pose
 from body_models.smpl.backends import core as smpl_core
+from body_models.smplh.backends import core as smplh_core
+from body_models.smplx.backends import core as smplx_core
+from body_models.soma import pose as soma_pose
+from body_models.soma.backends import core as soma_core
 from nanomanifold import SO3
 from viser import _messages
 
 
 _HANDLE_TYPES: dict[str, type["ViserBodyHandle"]] = {}
+_IDENTITY_PARAMS = {"gender", "age", "muscle", "weight", "height", "proportions"}
 _BASE_VERTEX_PARAMS = {
+    "anny": _IDENTITY_PARAMS,
     "smpl": {"shape"},
+    "smplh": {"shape"},
+    "smplx": {"shape", "expression"},
     "mhr": {"shape", "expression"},
+    "soma": {"identity", "scale_params"},
 }
 _VERTEX_PARAMS = {
+    "anny": _IDENTITY_PARAMS,
     "smpl": {"shape", "body_pose"},
+    "smplh": {"shape", "body_pose", "hand_pose"},
+    "smplx": {"shape", "body_pose", "hand_pose", "head_pose", "expression"},
     "mhr": {"shape", "body_pose", "hand_pose", "expression"},
+    "soma": {"identity", "scale_params", "body_pose", "head_pose", "hand_pose", "global_rotation"},
 }
 
 
@@ -219,13 +234,33 @@ class SmplBodyHandle(ViserBodyHandle):
     pass
 
 
+class SmplhBodyHandle(ViserBodyHandle):
+    pass
+
+
+class SmplxBodyHandle(ViserBodyHandle):
+    pass
+
+
 class MhrBodyHandle(ViserBodyHandle):
     pass
 
 
+class AnnyBodyHandle(ViserBodyHandle):
+    pass
+
+
+class SomaBodyHandle(ViserBodyHandle):
+    pass
+
+
 _HANDLE_TYPES.update({
+    "anny": AnnyBodyHandle,
     "smpl": SmplBodyHandle,
+    "smplh": SmplhBodyHandle,
+    "smplx": SmplxBodyHandle,
     "mhr": MhrBodyHandle,
+    "soma": SomaBodyHandle,
 })
 
 
@@ -244,7 +279,7 @@ def add_body_model(
     cast_shadow: bool = True,
     receive_shadow: bool | float = True,
 ) -> ViserBodyHandle:
-    """Add a non-rigid SMPL or MHR body model to a viser scene."""
+    """Add a non-rigid body model to a viser scene."""
     if getattr(model, "is_rigid_body", False):
         raise ValueError("add_body_model() only supports non-rigid models.")
 
@@ -300,29 +335,52 @@ def _runtime_source() -> str:
 
 def _base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     model_name = model.__class__.__name__.lower()
+    if model_name == "anny":
+        return _anny_base_vertices(model, pose)
     if model_name == "smpl":
+        return _smpl_base_vertices(model, pose)
+    if model_name == "smplh":
+        return _smpl_base_vertices(model, pose)
+    if model_name == "smplx":
         shape = _as_unbatched_array(pose["shape"])
-        return model.weights.v_template + np.einsum("s,vcs->vc", shape, model.weights.shapedirs[..., : shape.shape[-1]])
+        expression = _as_unbatched_array(pose["expression"])
+        return model.weights.v_template + np.einsum(
+            "p,vcp->vc",
+            np.concatenate([shape, expression]),
+            np.concatenate([model.weights.shapedirs[..., : shape.shape[-1]], model.weights.exprdirs[..., : expression.shape[-1]]], axis=-1),
+        )
     if model_name == "mhr":
         expression = pose.get("expression")
         if expression is None:
             expression = np.zeros((*pose["shape"].shape[:-1], model.EXPR_DIM), dtype=pose["shape"].dtype)
         coeffs = np.concatenate([pose["shape"], expression], axis=-1)
         return _as_unbatched_array(model.weights.base_vertices + np.einsum("...i,ivk->...vk", coeffs, model.weights.blendshape_dirs))
+    if model_name == "soma":
+        return _soma_prepared_identity(model, pose).bind_shape_active * 0.01
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
 def _vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
     model_name = model.__class__.__name__.lower()
+    if model_name == "anny":
+        return base_vertices
     if model_name == "smpl":
         return _smpl_vertices(model, pose, base_vertices)
+    if model_name == "smplh":
+        return _smplh_vertices(model, pose, base_vertices)
+    if model_name == "smplx":
+        return _smplx_vertices(model, pose, base_vertices)
     if model_name == "mhr":
         return _mhr_vertices(model, pose, base_vertices)
+    if model_name == "soma":
+        return _soma_vertices(model, pose, base_vertices)
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
 def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     model_name = model.__class__.__name__.lower()
+    if model_name == "anny":
+        return _anny_bone_transforms(model, pose)
     if model_name == "smpl":
         _, joints, _, _ = smpl_core._forward_core(
             xp=np,
@@ -339,9 +397,104 @@ def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
             rotation_type=model.rotation_type,
         )
         return _smpl_lbs_transforms(model.forward_skeleton(**pose), joints)
+    if model_name == "smplh":
+        _, joints, _, _ = smplh_core._forward_core(
+            xp=np,
+            v_template=None,
+            shapedirs=None,
+            j_template=model.weights.j_template,
+            j_shapedirs=model.weights.j_shapedirs,
+            parents=model.weights.parents,
+            kinematic_fronts=model.weights.kinematic_fronts,
+            hand_mean=model.weights.hand_mean,
+            shape=pose["shape"],
+            body_pose=pose["body_pose"],
+            hand_pose=pose["hand_pose"],
+            pelvis_rotation=pose.get("pelvis_rotation"),
+            skeleton_only=True,
+            rotation_type=model.rotation_type,
+        )
+        return _smpl_lbs_transforms(model.forward_skeleton(**pose), joints)
+    if model_name == "smplx":
+        _, joints, _, _ = smplx_core._forward_core(
+            xp=np,
+            v_template=None,
+            shapedirs=None,
+            exprdirs=None,
+            j_template=model.weights.j_template,
+            j_shapedirs=model.weights.j_shapedirs,
+            j_exprdirs=model.weights.j_exprdirs,
+            parents=model.weights.parents,
+            kinematic_fronts=model.weights.kinematic_fronts,
+            hand_mean=model.weights.hand_mean,
+            shape=pose["shape"],
+            expression=pose["expression"],
+            body_pose=pose["body_pose"],
+            hand_pose=pose["hand_pose"],
+            head_pose=pose["head_pose"],
+            pelvis_rotation=pose.get("pelvis_rotation"),
+            skeleton_only=True,
+            rotation_type=model.rotation_type,
+        )
+        return _smpl_lbs_transforms(model.forward_skeleton(**pose), joints)
     if model_name == "mhr":
         return _mhr_bone_transforms(model, pose)
+    if model_name == "soma":
+        return _soma_bone_transforms(model, pose)
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
+
+
+def _anny_pose(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    return anny_pose.pack_pose(
+        np,
+        pose["global_rotation"],
+        pose["body_pose"],
+        pose["head_pose"],
+        pose["hand_pose"],
+    )
+
+
+def _anny_unskinned(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+    weights = model.weights
+    return anny_core.forward_unskinned_vertices(
+        template_vertices=weights.template_vertices,
+        blendshapes=weights.blendshapes,
+        template_bone_heads=weights.template_bone_heads,
+        template_bone_tails=weights.template_bone_tails,
+        bone_heads_blendshapes=weights.bone_heads_blendshapes,
+        bone_tails_blendshapes=weights.bone_tails_blendshapes,
+        bone_rolls_rotmat=weights.bone_rolls_rotmat,
+        phenotype_mask=weights.phenotype_mask,
+        anchors=weights.anchors,
+        kinematic_fronts=weights.kinematic_fronts,
+        y_axis=weights.y_axis,
+        degenerate_rotation=weights.degenerate_rotation,
+        extrapolate_phenotypes=model.extrapolate_phenotypes,
+        gender=pose["gender"],
+        age=pose["age"],
+        muscle=pose["muscle"],
+        weight=pose["weight"],
+        height=pose["height"],
+        proportions=pose["proportions"],
+        pose=_anny_pose(model, pose),
+        rotation_type=model.rotation_type,
+        xp=np,
+    )
+
+
+def _anny_base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    vertices, _ = _anny_unskinned(model, pose)
+    return _as_unbatched_array(vertices)
+
+
+def _anny_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    _, transforms = _anny_unskinned(model, pose)
+    return _apply_global_transform(transforms, pose.get("global_rotation"), pose.get("global_translation"))
+
+
+def _smpl_base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    shape = _as_unbatched_array(pose["shape"])
+    return model.weights.v_template + np.einsum("s,vcs->vc", shape, model.weights.shapedirs[..., : shape.shape[-1]])
 
 
 def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
@@ -355,6 +508,54 @@ def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.nd
         kinematic_fronts=model.weights.kinematic_fronts,
         shape=pose["shape"],
         body_pose=pose["body_pose"],
+        pelvis_rotation=pose.get("pelvis_rotation"),
+        skeleton_only=True,
+        rotation_type=model.rotation_type,
+    )
+    pose_delta = (pose_matrices[..., 1:, :, :] - np.eye(3, dtype=pose_matrices.dtype)).reshape(-1)
+    vertices = base_vertices + (pose_delta @ model.weights.posedirs).reshape(-1, 3)
+    return _as_unbatched_array(vertices)
+
+
+def _smplh_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    _, _, pose_matrices, _ = smplh_core._forward_core(
+        xp=np,
+        v_template=None,
+        shapedirs=None,
+        j_template=model.weights.j_template,
+        j_shapedirs=model.weights.j_shapedirs,
+        parents=model.weights.parents,
+        kinematic_fronts=model.weights.kinematic_fronts,
+        hand_mean=model.weights.hand_mean,
+        shape=pose["shape"],
+        body_pose=pose["body_pose"],
+        hand_pose=pose["hand_pose"],
+        pelvis_rotation=pose.get("pelvis_rotation"),
+        skeleton_only=True,
+        rotation_type=model.rotation_type,
+    )
+    pose_delta = (pose_matrices[..., 1:, :, :] - np.eye(3, dtype=pose_matrices.dtype)).reshape(-1)
+    vertices = base_vertices + (pose_delta @ model.weights.posedirs).reshape(-1, 3)
+    return _as_unbatched_array(vertices)
+
+
+def _smplx_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    _, _, pose_matrices, _ = smplx_core._forward_core(
+        xp=np,
+        v_template=None,
+        shapedirs=None,
+        exprdirs=None,
+        j_template=model.weights.j_template,
+        j_shapedirs=model.weights.j_shapedirs,
+        j_exprdirs=model.weights.j_exprdirs,
+        parents=model.weights.parents,
+        kinematic_fronts=model.weights.kinematic_fronts,
+        hand_mean=model.weights.hand_mean,
+        shape=pose["shape"],
+        expression=pose["expression"],
+        body_pose=pose["body_pose"],
+        hand_pose=pose["hand_pose"],
+        head_pose=pose["head_pose"],
         pelvis_rotation=pose.get("pelvis_rotation"),
         skeleton_only=True,
         rotation_type=model.rotation_type,
@@ -412,6 +613,59 @@ def _mhr_skeleton_core(model: Any, packed_pose: np.ndarray) -> tuple[np.ndarray,
     )
 
 
+def _soma_pose(pose: dict[str, np.ndarray]) -> np.ndarray:
+    return soma_pose.pack_pose(
+        np,
+        pose["global_rotation"],
+        pose["body_pose"],
+        pose["head_pose"],
+        pose["hand_pose"],
+    )
+
+
+def _soma_prepared_identity(model: Any, pose: dict[str, np.ndarray]) -> Any:
+    return model.prepare_identity(
+        identity=pose.get("identity"),
+        scale_params=pose.get("scale_params"),
+        pose=_soma_pose(pose),
+        cache=False,
+    )
+
+
+def _soma_pose_rot_full(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    pose_rot = SO3.convert(_soma_pose(pose), src=model.rotation_type, dst="rotmat", xp=np)
+    return soma_core._orient_pose_rot_full(
+        np,
+        pose_rot,
+        model.weights.t_pose_world,
+        model.weights.topology.parents_full,
+    )
+
+
+def _soma_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    correctives = soma_core.apply_pose_correctives(model.weights, _soma_pose_rot_full(model, pose), xp=np)
+    if model.weights.vertex_map is not None:
+        correctives = correctives[..., model.weights.vertex_map, :]
+    return base_vertices + _as_unbatched_array(correctives) * 0.01
+
+
+def _soma_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    prepared = _soma_prepared_identity(model, pose)
+    world_bind_pose = prepared.world_bind_pose
+    pose_rot_full = _soma_pose_rot_full(model, pose)
+    world = soma_core._pose_skeleton_from_oriented_pose(
+        xp=np,
+        world_bind_pose=world_bind_pose,
+        kinematic_fronts=model.weights.topology.kinematic_fronts_full,
+        parents_full=model.weights.topology.parents_full,
+        pose_rot_full=pose_rot_full,
+    )
+    transforms = world @ prepared.inverse_world_bind_pose
+    transforms = _as_unbatched_array(transforms)[1:]
+    transforms[:, :3, 3] *= 0.01
+    return _apply_global_transform(transforms, pose.get("global_rotation"), pose.get("global_translation"))
+
+
 def _apply_global_transform(
     transforms: np.ndarray,
     rotation: np.ndarray | None,
@@ -445,6 +699,11 @@ def _triangular_faces(model: Any) -> np.ndarray:
 
 
 def _sparse_skinning(model: Any) -> tuple[np.ndarray, np.ndarray]:
+    model_name = model.__class__.__name__.lower()
+    if model_name == "soma":
+        indices = model.weights.skin_joint_indices_active - 1
+        return model.weights.skin_joint_weights_active, indices
+
     if hasattr(model.weights, "skin_indices") and hasattr(model.weights, "skin_weights"):
         return model.weights.skin_weights, model.weights.skin_indices
 
