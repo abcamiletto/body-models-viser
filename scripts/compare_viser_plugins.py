@@ -16,6 +16,8 @@ from body_models.extras.viser_plugin import add_body_model
 from body_models.garment_measurements.torch import GarmentMeasurements
 from body_models.mhr.torch import MHR
 from body_models.smpl.torch import SMPL
+from body_models.smplh.torch import SMPLH
+from body_models.smplx.torch import SMPLX
 from body_models.soma.torch import SOMA
 
 
@@ -23,6 +25,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 PYTHON_MODELS = {
     "smpl": lambda: SMPL(gender="neutral").eval(),
+    "smplh": lambda: SMPLH(gender="neutral").eval(),
+    "smplx": lambda: SMPLX(gender="neutral").eval(),
     "mhr": lambda: MHR().eval(),
     "anny": lambda: ANNY().eval(),
     "soma": lambda: SOMA().eval(),
@@ -34,7 +38,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model",
-        choices=("smpl", "mhr", "anny", "soma", "garment", "all"),
+        choices=("smpl", "smplh", "smplx", "mhr", "anny", "soma", "garment", "all"),
         default="all",
     )
     parser.add_argument("--case", default="shape_pose", choices=("rest", "shape_pose", "translation"))
@@ -82,6 +86,25 @@ def add_comparison(scene: viser.SceneApi, model_name: str, case: str, y: float) 
 
 def smpl_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
     names = ("shape", "body_pose", "pelvis_rotation", "global_rotation", "global_translation")
+    return tensors(params, names)
+
+
+def smplh_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
+    names = ("shape", "body_pose", "hand_pose", "pelvis_rotation", "global_rotation", "global_translation")
+    return tensors(params, names)
+
+
+def smplx_params(params: dict[str, Any]) -> dict[str, torch.Tensor]:
+    names = (
+        "shape",
+        "body_pose",
+        "hand_pose",
+        "head_pose",
+        "expression",
+        "pelvis_rotation",
+        "global_rotation",
+        "global_translation",
+    )
     return tensors(params, names)
 
 
@@ -145,6 +168,8 @@ def run_rust_model(model_name: str, case: str) -> dict[str, Any]:
 def ensure_generated() -> None:
     required = [
         ROOT / "generated" / "model_data" / "smpl.json",
+        ROOT / "generated" / "model_data" / "smplh.json",
+        ROOT / "generated" / "model_data" / "smplx.json",
         ROOT / "generated" / "model_data" / "mhr.json",
         ROOT / "generated" / "model_data" / "anny.json",
         ROOT / "generated" / "model_data" / "soma.json",
@@ -180,7 +205,7 @@ def bone_positions(skeleton: list[Any]) -> np.ndarray:
 
 
 def dense_skin_weights(model_name: str, weights: dict[str, Any]) -> np.ndarray:
-    if model_name == "smpl":
+    if model_name in {"smpl", "smplh", "smplx"}:
         return np.asarray(weights["lbs_weights"], dtype=np.float32)
     if model_name == "anny":
         return sparse_to_dense(weights["lbs_joint_indices"], weights["lbs_joint_weights"], len(weights["parents"]))
@@ -208,6 +233,8 @@ def sparse_to_dense(indices: Any, weights: Any, num_joints: int) -> np.ndarray:
 
 PARAMS = {
     "smpl": smpl_params,
+    "smplh": smplh_params,
+    "smplx": smplx_params,
     "mhr": mhr_params,
     "anny": anny_params,
     "soma": soma_params,

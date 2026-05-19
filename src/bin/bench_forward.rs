@@ -1,7 +1,8 @@
 use anyhow::Result;
 use body_models_viser::{
-    AnnyModel, GarmentModel, MhrModel, Params, SmplModel, SomaModel, anny_forward, garment_forward,
-    load_json, mhr_forward, smpl_forward, soma_forward,
+    AnnyModel, GarmentModel, MhrModel, Params, SmplModel, SmplhModel, SmplxModel, SomaModel,
+    anny_forward, garment_forward, load_json, mhr_forward, smpl_forward, smplh_forward,
+    smplx_forward, soma_forward,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -14,6 +15,20 @@ fn main() -> Result<()> {
     let smpl_fixture: body_models_viser::Fixture =
         load_json(&root.join("fixtures/smpl/shape_pose.json"))?;
     let Params::Smpl(smpl_params) = smpl_fixture.params else {
+        unreachable!();
+    };
+
+    let smplh_model: SmplhModel = load_json(&model_data.join("smplh.json"))?;
+    let smplh_fixture: body_models_viser::Fixture =
+        load_json(&root.join("fixtures/smplh/shape_pose.json"))?;
+    let Params::Smplh(smplh_params) = smplh_fixture.params else {
+        unreachable!();
+    };
+
+    let smplx_model: SmplxModel = load_json(&model_data.join("smplx.json"))?;
+    let smplx_fixture: body_models_viser::Fixture =
+        load_json(&root.join("fixtures/smplx/shape_pose.json"))?;
+    let Params::Smplx(smplx_params) = smplx_fixture.params else {
         unreachable!();
     };
 
@@ -46,6 +61,8 @@ fn main() -> Result<()> {
     };
 
     time("smpl", 200, || smpl_forward(&smpl_model, &smpl_params))?;
+    time("smplh", 100, || smplh_forward(&smplh_model, &smplh_params))?;
+    time("smplx", 50, || smplx_forward(&smplx_model, &smplx_params))?;
     time("mhr", 50, || mhr_forward(&mhr_model, &mhr_params))?;
     time("anny", 20, || anny_forward(&anny_model, &anny_params))?;
     time("soma", 20, || soma_forward(&soma_model, &soma_params))?;

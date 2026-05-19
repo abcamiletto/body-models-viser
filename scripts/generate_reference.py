@@ -10,7 +10,9 @@ import torch
 from body_models.anny.torch import ANNY
 from body_models.garment_measurements.torch import GarmentMeasurements
 from body_models.mhr.torch import MHR
+from body_models.smplh.torch import SMPLH
 from body_models.smpl.torch import SMPL
+from body_models.smplx.torch import SMPLX
 from body_models.soma.pose import pack_pose as pack_soma_pose
 from body_models.soma.torch import SOMA
 
@@ -59,6 +61,32 @@ def mhr_params(model: MHR, fixture: dict[str, Any]) -> dict[str, torch.Tensor]:
         "expression": tensor1(params["expression"], model.EXPR_DIM, "MHR expression")[None],
         "global_rotation": tensor1(params["global_rotation"], 3, "MHR global_rotation")[None],
         "global_translation": tensor1(params["global_translation"], 3, "MHR global_translation")[None],
+    }
+
+
+def smplh_params(model: SMPLH, fixture: dict[str, Any]) -> dict[str, torch.Tensor]:
+    params = fixture["params"]
+    return {
+        "shape": tensor1(params["shape"], 10, "SMPLH shape")[None],
+        "body_pose": tensor2(params["body_pose"], model.NUM_BODY_JOINTS, 3, "SMPLH body_pose")[None],
+        "hand_pose": tensor2(params["hand_pose"], model.NUM_HAND_JOINTS, 3, "SMPLH hand_pose")[None],
+        "pelvis_rotation": tensor1(params["pelvis_rotation"], 3, "SMPLH pelvis_rotation")[None],
+        "global_rotation": tensor1(params["global_rotation"], 3, "SMPLH global_rotation")[None],
+        "global_translation": tensor1(params["global_translation"], 3, "SMPLH global_translation")[None],
+    }
+
+
+def smplx_params(model: SMPLX, fixture: dict[str, Any]) -> dict[str, torch.Tensor]:
+    params = fixture["params"]
+    return {
+        "shape": tensor1(params["shape"], 10, "SMPLX shape")[None],
+        "body_pose": tensor2(params["body_pose"], model.NUM_BODY_JOINTS, 3, "SMPLX body_pose")[None],
+        "hand_pose": tensor2(params["hand_pose"], model.NUM_HAND_JOINTS, 3, "SMPLX hand_pose")[None],
+        "head_pose": tensor2(params["head_pose"], model.NUM_HEAD_JOINTS, 3, "SMPLX head_pose")[None],
+        "expression": tensor1(params["expression"], 10, "SMPLX expression")[None],
+        "pelvis_rotation": tensor1(params["pelvis_rotation"], 3, "SMPLX pelvis_rotation")[None],
+        "global_rotation": tensor1(params["global_rotation"], 3, "SMPLX global_rotation")[None],
+        "global_translation": tensor1(params["global_translation"], 3, "SMPLX global_translation")[None],
     }
 
 
@@ -131,6 +159,70 @@ def export_smpl(root: Path, out: Path) -> None:
             out / "reference" / "smpl" / fixture_path.name,
             {
                 "model": "smpl",
+                "case": fixture["case"],
+                "skeleton": model.forward_skeleton(**params)[0],
+                "mesh": model.forward_vertices(**params)[0],
+            },
+        )
+
+
+def export_smplh(root: Path, out: Path) -> None:
+    model = SMPLH(gender="neutral").eval()
+    weights = model.weights
+    write_json(
+        out / "model_data" / "smplh.json",
+        {
+            "v_template": weights.v_template,
+            "faces": weights.faces,
+            "lbs_weights": weights.lbs_weights,
+            "shapedirs": weights.shapedirs[:, :, :10],
+            "posedirs": weights.posedirs,
+            "j_template": weights.j_template,
+            "j_shapedirs": weights.j_shapedirs[:, :, :10],
+            "hand_mean": weights.hand_mean,
+            "parents": weights.parents,
+        },
+    )
+    for fixture_path in sorted((root / "fixtures" / "smplh").glob("*.json")):
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        params = smplh_params(model, fixture)
+        write_json(
+            out / "reference" / "smplh" / fixture_path.name,
+            {
+                "model": "smplh",
+                "case": fixture["case"],
+                "skeleton": model.forward_skeleton(**params)[0],
+                "mesh": model.forward_vertices(**params)[0],
+            },
+        )
+
+
+def export_smplx(root: Path, out: Path) -> None:
+    model = SMPLX(gender="neutral").eval()
+    weights = model.weights
+    write_json(
+        out / "model_data" / "smplx.json",
+        {
+            "v_template": weights.v_template,
+            "faces": weights.faces,
+            "lbs_weights": weights.lbs_weights,
+            "shapedirs": weights.shapedirs[:, :, :10],
+            "exprdirs": weights.exprdirs[:, :, :10],
+            "posedirs": weights.posedirs,
+            "j_template": weights.j_template,
+            "j_shapedirs": weights.j_shapedirs[:, :, :10],
+            "j_exprdirs": weights.j_exprdirs[:, :, :10],
+            "hand_mean": weights.hand_mean,
+            "parents": weights.parents,
+        },
+    )
+    for fixture_path in sorted((root / "fixtures" / "smplx").glob("*.json")):
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        params = smplx_params(model, fixture)
+        write_json(
+            out / "reference" / "smplx" / fixture_path.name,
+            {
+                "model": "smplx",
                 "case": fixture["case"],
                 "skeleton": model.forward_skeleton(**params)[0],
                 "mesh": model.forward_vertices(**params)[0],
@@ -288,8 +380,8 @@ def main() -> None:
     parser.add_argument(
         "--models",
         nargs="+",
-        choices=("smpl", "mhr", "anny", "soma", "garment"),
-        default=("smpl", "mhr", "anny", "soma", "garment"),
+        choices=("smpl", "smplh", "smplx", "mhr", "anny", "soma", "garment"),
+        default=("smpl", "smplh", "smplx", "mhr", "anny", "soma", "garment"),
     )
     args = parser.parse_args()
 
@@ -297,6 +389,10 @@ def main() -> None:
     out = args.output if args.output.is_absolute() else root / args.output
     if "smpl" in args.models:
         export_smpl(root, out)
+    if "smplh" in args.models:
+        export_smplh(root, out)
+    if "smplx" in args.models:
+        export_smplx(root, out)
     if "mhr" in args.models:
         export_mhr(root, out)
     if "anny" in args.models:

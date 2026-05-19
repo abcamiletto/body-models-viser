@@ -63,10 +63,6 @@ pub(crate) fn ensure_len<T>(values: &[T], len: usize, name: &str) -> Result<()> 
     Ok(())
 }
 
-pub(crate) fn dot<const N: usize>(a: &[f64; N], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(x, y)| x * y).sum()
-}
-
 pub(crate) fn sparse_rows<'a>(
     cache: &'a OnceLock<SparseRows<f64>>,
     dense: &[Vec<f64>],

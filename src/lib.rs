@@ -14,7 +14,7 @@ use std::path::Path;
 pub use anny::anny_forward;
 pub use garment::garment_forward;
 pub use mhr::mhr_forward;
-pub use smpl::smpl_forward;
+pub use smpl::{smpl_forward, smplh_forward, smplx_forward};
 pub use soma::soma_forward;
 pub use types::*;
 
@@ -34,6 +34,14 @@ pub fn run_fixture(model_data_dir: &Path, fixture_path: &Path) -> Result<ModelOu
         ("smpl", Params::Smpl(params)) => {
             let model_data = load_json(&model_data_dir.join("smpl.json"))?;
             smpl::smpl_forward(&model_data, &params)?
+        }
+        ("smplh", Params::Smplh(params)) => {
+            let model_data = load_json(&model_data_dir.join("smplh.json"))?;
+            smpl::smplh_forward(&model_data, &params)?
+        }
+        ("smplx", Params::Smplx(params)) => {
+            let model_data = load_json(&model_data_dir.join("smplx.json"))?;
+            smpl::smplx_forward(&model_data, &params)?
         }
         ("mhr", Params::Mhr(params)) => {
             let model_data = load_json(&model_data_dir.join("mhr.json"))?;

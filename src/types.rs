@@ -4,7 +4,6 @@ use std::sync::OnceLock;
 pub type Vec3 = [f64; 3];
 pub type Mat3 = [[f64; 3]; 3];
 pub type Mat4 = [[f64; 4]; 4];
-pub type Mat10 = [[f64; 10]; 3];
 type SparseScalarRows = SparseRows<f64>;
 type SparseVec3Rows = SparseRows<Vec3>;
 
@@ -40,7 +39,9 @@ pub struct Fixture {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum Params {
+    Smplx(SmplxParams),
     Garment(GarmentParams),
+    Smplh(SmplhParams),
     Smpl(SmplParams),
     Mhr(MhrParams),
     Anny(AnnyParams),
@@ -51,6 +52,28 @@ pub enum Params {
 pub struct SmplParams {
     pub shape: Vec<f64>,
     pub body_pose: Vec<Vec3>,
+    pub pelvis_rotation: Vec3,
+    pub global_rotation: Vec3,
+    pub global_translation: Vec3,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SmplhParams {
+    pub shape: Vec<f64>,
+    pub body_pose: Vec<Vec3>,
+    pub hand_pose: Vec<Vec3>,
+    pub pelvis_rotation: Vec3,
+    pub global_rotation: Vec3,
+    pub global_translation: Vec3,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SmplxParams {
+    pub shape: Vec<f64>,
+    pub body_pose: Vec<Vec3>,
+    pub hand_pose: Vec<Vec3>,
+    pub head_pose: Vec<Vec3>,
+    pub expression: Vec<f64>,
     pub pelvis_rotation: Vec3,
     pub global_rotation: Vec3,
     pub global_translation: Vec3,
@@ -110,18 +133,28 @@ pub struct ModelOutput {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SmplModel {
+pub struct SmplFamilyModel {
     pub v_template: Vec<Vec3>,
     pub faces: Vec<[usize; 3]>,
     pub lbs_weights: Vec<Vec<f64>>,
-    pub shapedirs: Vec<Mat10>,
+    pub shapedirs: Vec<Vec<Vec<f64>>>,
+    #[serde(default)]
+    pub exprdirs: Vec<Vec<Vec<f64>>>,
     pub posedirs: Vec<Vec<f64>>,
     pub j_template: Vec<Vec3>,
-    pub j_shapedirs: Vec<Mat10>,
+    pub j_shapedirs: Vec<Vec<Vec<f64>>>,
+    #[serde(default)]
+    pub j_exprdirs: Vec<Vec<Vec<f64>>>,
+    #[serde(default)]
+    pub hand_mean: Vec<Vec<f64>>,
     pub parents: Vec<isize>,
     #[serde(skip)]
     pub(crate) lbs_weights_sparse: OnceLock<SparseScalarRows>,
 }
+
+pub type SmplModel = SmplFamilyModel;
+pub type SmplhModel = SmplFamilyModel;
+pub type SmplxModel = SmplFamilyModel;
 
 #[derive(Debug, Deserialize)]
 pub struct MhrModel {
