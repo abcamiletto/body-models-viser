@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 from body_models.mhr.backends import core as mhr_core
 from body_models.mhr.pose import pack_pose
-from body_models.smpl.backends.core import forward_unskinned_vertices as smpl_unskinned_vertices
+from body_models.smpl.backends.core import _forward_core as smpl_forward_core
 from nanomanifold import SO3
 from viser import _messages
 
@@ -49,6 +49,7 @@ class ViserBodyHandle:
         model: Any,
         pose: dict[str, np.ndarray],
         vertices: np.ndarray,
+        base_vertices: np.ndarray,
     ) -> None:
         self.scene = scene
         self._name = name
@@ -56,6 +57,7 @@ class ViserBodyHandle:
         self.model_name = model.__class__.__name__
         self.pose = pose
         self._vertices = vertices
+        self._base_vertices = base_vertices
         self._wxyz = np.array([1.0, 0.0, 0.0, 0.0])
         self._position = np.zeros(3)
         self._visible = True
@@ -163,16 +165,16 @@ class ViserBodyHandle:
         self.set_pose(pelvis_rotation=value)
 
     def set_pose(self, **forward_kwargs: np.ndarray) -> None:
-        changed = False
+        changed: set[str] = set()
         for name, value in forward_kwargs.items():
             current = self._param(name)
             value = np.asarray(value)
             if np.array_equal(current, value):
                 continue
             self.pose[name] = value.copy()
-            changed = True
+            changed.add(name)
         if changed:
-            self._apply_pose()
+            self._apply_pose(changed)
 
     def remove(self) -> None:
         self.scene._websock_interface.queue_message(_messages.RemoveSceneNodeMessage(self.name))
@@ -181,12 +183,16 @@ class ViserBodyHandle:
         assert name in self.pose, f"{self.model_name} does not support {name!r}."
         return self.pose[name]
 
-    def _apply_pose(self) -> None:
-        vertices, bone_transforms = _skinning_state(self.model, self.pose)
+    def _apply_pose(self, changed: set[str]) -> None:
+        if changed & _base_vertex_params(self.model):
+            self._base_vertices = _base_vertices(self.model, self.pose)
+
         vertex_payload = None
-        if not np.array_equal(vertices, self._vertices):
-            self._vertices = vertices
-            vertex_payload = np.asarray(vertices, dtype=np.float32).tolist()
+        if changed & _vertex_params(self.model):
+            self._vertices = _vertices(self.model, self.pose, self._base_vertices)
+            vertex_payload = np.asarray(self._vertices, dtype=np.float32).tolist()
+
+        bone_transforms = _bone_transforms(self.model, self.pose)
         self.scene._websock_interface.queue_message(
             BodyModelPoseMessage(
                 self.name,
@@ -225,7 +231,9 @@ def add_body_model(
 
     pose = {key: np.asarray(value).copy() for key, value in model.get_rest_pose().items()}
     _install_runtime(scene)
-    vertices, bone_transforms = _skinning_state(model, pose)
+    base_vertices = _base_vertices(model, pose)
+    vertices = _vertices(model, pose, base_vertices)
+    bone_transforms = _bone_transforms(model, pose)
     skin_weights, skin_joints = _sparse_skinning(model)
     scene._websock_interface.queue_message(
         BodyModelMeshMessage(
@@ -247,7 +255,7 @@ def add_body_model(
         ),
     )
     handle_type = _handle_type(model)
-    return handle_type(scene, name, model, pose, vertices)
+    return handle_type(scene, name, model, pose, vertices, base_vertices)
 
 
 def _handle_type(model: Any) -> type[ViserBodyHandle]:
@@ -272,20 +280,75 @@ def _runtime_source() -> str:
     return development.read_text()
 
 
-def _skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+def _base_vertex_params(model: Any) -> set[str]:
     model_name = model.__class__.__name__.lower()
     if model_name == "smpl":
-        return _smpl_skinning_state(model, pose)
+        return {"shape"}
     if model_name == "mhr":
-        return _mhr_skinning_state(model, pose)
+        return {"shape", "expression"}
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
-def _smpl_skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
-    vertices, joints, _ = smpl_unskinned_vertices(
-        v_template=model.weights.v_template,
-        shapedirs=model.weights.shapedirs,
-        posedirs=model.weights.posedirs,
+def _vertex_params(model: Any) -> set[str]:
+    model_name = model.__class__.__name__.lower()
+    if model_name == "smpl":
+        return {"shape", "body_pose"}
+    if model_name == "mhr":
+        return {"shape", "body_pose", "hand_pose", "expression"}
+    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
+
+
+def _base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    model_name = model.__class__.__name__.lower()
+    if model_name == "smpl":
+        shape = _as_unbatched_array(pose["shape"])
+        return model.weights.v_template + np.einsum("s,vcs->vc", shape, model.weights.shapedirs[..., : shape.shape[-1]])
+    if model_name == "mhr":
+        expression = pose.get("expression")
+        if expression is None:
+            expression = np.zeros((*pose["shape"].shape[:-1], model.EXPR_DIM), dtype=pose["shape"].dtype)
+        coeffs = np.concatenate([pose["shape"], expression], axis=-1)
+        return _as_unbatched_array(model.weights.base_vertices + np.einsum("...i,ivk->...vk", coeffs, model.weights.blendshape_dirs))
+    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
+
+
+def _vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    model_name = model.__class__.__name__.lower()
+    if model_name == "smpl":
+        return _smpl_vertices(model, pose, base_vertices)
+    if model_name == "mhr":
+        return _mhr_vertices(model, pose, base_vertices)
+    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
+
+
+def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+    model_name = model.__class__.__name__.lower()
+    if model_name == "smpl":
+        _, joints, _, _ = smpl_forward_core(
+            xp=np,
+            v_template=None,
+            shapedirs=None,
+            j_template=model.weights.j_template,
+            j_shapedirs=model.weights.j_shapedirs,
+            parents=model.weights.parents,
+            kinematic_fronts=model.weights.kinematic_fronts,
+            shape=pose["shape"],
+            body_pose=pose["body_pose"],
+            pelvis_rotation=pose.get("pelvis_rotation"),
+            skeleton_only=True,
+            rotation_type=model.rotation_type,
+        )
+        return _smpl_lbs_transforms(model.forward_skeleton(**pose), joints)
+    if model_name == "mhr":
+        return _mhr_bone_transforms(model, pose)
+    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
+
+
+def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    _, _, pose_matrices, _ = smpl_forward_core(
+        xp=np,
+        v_template=None,
+        shapedirs=None,
         j_template=model.weights.j_template,
         j_shapedirs=model.weights.j_shapedirs,
         parents=model.weights.parents,
@@ -293,11 +356,12 @@ def _smpl_skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.nd
         shape=pose["shape"],
         body_pose=pose["body_pose"],
         pelvis_rotation=pose.get("pelvis_rotation"),
+        skeleton_only=True,
         rotation_type=model.rotation_type,
-        xp=np,
     )
-    skeleton = model.forward_skeleton(**pose)
-    return _as_unbatched_array(vertices), _smpl_lbs_transforms(skeleton, joints)
+    pose_delta = (pose_matrices[..., 1:, :, :] - np.eye(3, dtype=pose_matrices.dtype)).reshape(-1)
+    vertices = base_vertices + (pose_delta @ model.weights.posedirs).reshape(-1, 3)
+    return _as_unbatched_array(vertices)
 
 
 def _smpl_lbs_transforms(skeleton: np.ndarray, joints: np.ndarray) -> np.ndarray:
@@ -309,28 +373,22 @@ def _smpl_lbs_transforms(skeleton: np.ndarray, joints: np.ndarray) -> np.ndarray
     return transforms
 
 
-def _mhr_skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+def _mhr_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+    packed_pose = pack_pose(np, pose["body_pose"], pose["hand_pose"])
+    _, _, _, joint_params = _mhr_skeleton_core(model, packed_pose)
+    vertices = base_vertices + mhr_core.apply_pose_correctives(
+        joint_params,
+        model.weights.corrective_W1,
+        model.weights.corrective_W2,
+        xp=np,
+    )
+    return _as_unbatched_array(vertices)
+
+
+def _mhr_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     weights = model.weights
     packed_pose = pack_pose(np, pose["body_pose"], pose["hand_pose"])
-    expression = pose.get("expression")
-    if expression is None:
-        expression = np.zeros((*packed_pose.shape[:-1], model.EXPR_DIM), dtype=packed_pose.dtype)
-
-    t_g, r_g, s_g, joint_params = mhr_core._forward_skeleton_core(
-        xp=np,
-        pose=packed_pose,
-        joint_offsets=weights.joint_offsets,
-        joint_pre_rotations=weights.joint_pre_rotations,
-        parameter_transform=weights.parameter_transform,
-        kinematic_fronts=weights.kinematic_fronts,
-        num_joints=model.num_joints,
-        shape_dim=model.SHAPE_DIM,
-    )
-    shape = np.broadcast_to(pose["shape"], (*packed_pose.shape[:-1], pose["shape"].shape[-1]))
-    coeffs = np.concatenate([shape, expression], axis=-1)
-    vertices = weights.base_vertices + np.einsum("...i,ivk->...vk", coeffs, weights.blendshape_dirs)
-    vertices = vertices + mhr_core.apply_pose_correctives(joint_params, weights.corrective_W1, weights.corrective_W2, xp=np)
-
+    t_g, r_g, s_g, _ = _mhr_skeleton_core(model, packed_pose)
     lin_g = r_g * s_g[..., None]
     transforms = np.repeat(np.eye(4, dtype=np.float32)[None, None], model.num_joints, axis=1)
     transforms[..., :3, :3] = 0.01 * np.einsum("...jik,jkl->...jil", lin_g, weights.bind_inv_linear)
@@ -338,7 +396,20 @@ def _mhr_skinning_state(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.nda
         np.einsum("...jik,jk->...ji", lin_g, weights.bind_inv_translation) + t_g
     )
     transforms = _apply_global_transform(transforms, pose.get("global_rotation"), pose.get("global_translation"))
-    return _as_unbatched_array(vertices), _as_unbatched_array(transforms)
+    return _as_unbatched_array(transforms)
+
+
+def _mhr_skeleton_core(model: Any, packed_pose: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    return mhr_core._forward_skeleton_core(
+        xp=np,
+        pose=packed_pose,
+        joint_offsets=model.weights.joint_offsets,
+        joint_pre_rotations=model.weights.joint_pre_rotations,
+        parameter_transform=model.weights.parameter_transform,
+        kinematic_fronts=model.weights.kinematic_fronts,
+        num_joints=model.num_joints,
+        shape_dim=model.SHAPE_DIM,
+    )
 
 
 def _apply_global_transform(
