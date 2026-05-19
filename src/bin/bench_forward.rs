@@ -1,6 +1,7 @@
 use anyhow::Result;
 use body_models_viser::{
-    MhrModel, MhrParams, SmplModel, SmplParams, load_json, mhr_forward, smpl_forward,
+    AnnyModel, AnnyParams, MhrModel, MhrParams, SmplModel, SmplParams, SomaModel, SomaParams,
+    anny_forward, load_json, mhr_forward, smpl_forward, soma_forward,
 };
 use std::path::PathBuf;
 use std::time::Instant;
@@ -19,8 +20,20 @@ fn main() -> Result<()> {
         load_json(&root.join("fixtures/mhr/shape_pose.json"))?;
     let mhr_params: MhrParams = serde_json::from_value(mhr_fixture.params)?;
 
+    let anny_model: AnnyModel = load_json(&model_data.join("anny.json"))?;
+    let anny_fixture: body_models_viser::Fixture =
+        load_json(&root.join("fixtures/anny/shape_pose.json"))?;
+    let anny_params: AnnyParams = serde_json::from_value(anny_fixture.params)?;
+
+    let soma_model: SomaModel = load_json(&model_data.join("soma.json"))?;
+    let soma_fixture: body_models_viser::Fixture =
+        load_json(&root.join("fixtures/soma/shape_pose.json"))?;
+    let soma_params: SomaParams = serde_json::from_value(soma_fixture.params)?;
+
     time("smpl", 200, || smpl_forward(&smpl_model, &smpl_params))?;
     time("mhr", 50, || mhr_forward(&mhr_model, &mhr_params))?;
+    time("anny", 20, || anny_forward(&anny_model, &anny_params))?;
+    time("soma", 20, || soma_forward(&soma_model, &soma_params))?;
     Ok(())
 }
 

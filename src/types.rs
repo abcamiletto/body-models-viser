@@ -1,4 +1,4 @@
-use glam::{Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 use serde::{Deserialize, Serialize};
 
 pub type Mat3x10 = [[f32; 10]; 3];
@@ -25,6 +25,30 @@ pub struct MhrParams {
     pub body_pose: Vec<f32>,
     pub hand_pose: Vec<f32>,
     pub expression: Vec<f32>,
+    pub global_rotation: Vec3,
+    pub global_translation: Vec3,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnnyParams {
+    pub gender: f32,
+    pub age: f32,
+    pub muscle: f32,
+    pub weight: f32,
+    pub height: f32,
+    pub proportions: f32,
+    pub body_pose: Vec<Vec3>,
+    pub head_pose: Vec<Vec3>,
+    pub hand_pose: Vec<Vec3>,
+    pub global_rotation: Vec3,
+    pub global_translation: Vec3,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SomaParams {
+    pub body_pose: Vec<Vec3>,
+    pub head_pose: Vec<Vec3>,
+    pub hand_pose: Vec<Vec3>,
     pub global_rotation: Vec3,
     pub global_translation: Vec3,
 }
@@ -65,5 +89,42 @@ pub struct MhrModel {
     pub corrective_w1: Vec<Vec<f32>>,
     #[serde(rename = "corrective_W2")]
     pub corrective_w2: Vec<Vec<f32>>,
+    pub parents: Vec<isize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnnyModel {
+    pub template_vertices: Vec<Vec3>,
+    pub blendshapes: Vec<Vec<Vec3>>,
+    pub template_bone_heads: Vec<Vec3>,
+    pub template_bone_tails: Vec<Vec3>,
+    pub bone_heads_blendshapes: Vec<Vec<Vec3>>,
+    pub bone_tails_blendshapes: Vec<Vec<Vec3>>,
+    pub bone_rolls_rotmat: Vec<Mat3>,
+    pub phenotype_mask: Vec<Vec<f32>>,
+    pub lbs_joint_indices: Vec<Vec<usize>>,
+    pub lbs_joint_weights: Vec<Vec<f32>>,
+    pub faces: Vec<[usize; 4]>,
+    pub parents: Vec<isize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SomaModel {
+    pub bind_shape_active: Vec<Vec3>,
+    pub world_bind_pose: Vec<Mat4>,
+    pub inverse_world_bind_pose: Vec<Mat4>,
+    pub t_pose_world: Vec<Mat4>,
+    pub corrective_bindpose: Vec<Mat3>,
+    #[serde(rename = "corrective_W1")]
+    pub corrective_w1: Vec<Vec<f32>>,
+    #[serde(rename = "corrective_W2_rows")]
+    pub corrective_w2_rows: Vec<usize>,
+    #[serde(rename = "corrective_W2_cols")]
+    pub corrective_w2_cols: Vec<usize>,
+    #[serde(rename = "corrective_W2_values")]
+    pub corrective_w2_values: Vec<f32>,
+    pub skin_joint_indices: Vec<Vec<isize>>,
+    pub skin_joint_weights: Vec<Vec<f32>>,
+    pub faces: Vec<[usize; 3]>,
     pub parents: Vec<isize>,
 }

@@ -1,5 +1,7 @@
+mod anny;
 mod mhr;
 mod smpl;
+mod soma;
 mod types;
 
 use anyhow::{Context, Result, bail};
@@ -8,8 +10,10 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
+pub use anny::anny_forward;
 pub use mhr::mhr_forward;
 pub use smpl::smpl_forward;
+pub use soma::soma_forward;
 pub use types::*;
 
 pub fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
@@ -41,6 +45,16 @@ pub fn run_fixture(model_data_dir: &Path, fixture_path: &Path) -> Result<ModelOu
             let params = serde_json::from_value(params).context("parsing MHR fixture params")?;
             let model_data = load_json(&model_data_dir.join("mhr.json"))?;
             mhr_forward(&model_data, &params)?
+        }
+        "anny" => {
+            let params = serde_json::from_value(params).context("parsing ANNY fixture params")?;
+            let model_data = load_json(&model_data_dir.join("anny.json"))?;
+            anny_forward(&model_data, &params)?
+        }
+        "soma" => {
+            let params = serde_json::from_value(params).context("parsing SOMA fixture params")?;
+            let model_data = load_json(&model_data_dir.join("soma.json"))?;
+            soma_forward(&model_data, &params)?
         }
         model => bail!("unsupported fixture model {model:?}"),
     };

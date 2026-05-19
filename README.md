@@ -5,10 +5,10 @@
 viewer, without being limited by viser skinning constraints such as a fixed
 maximum number of bones per vertex.
 
-The package currently supports unbatched/default SMPL and MHR models. The Rust
-implementation is checked against Python `body-models` output using JSON
-fixtures, and the Python wheel ships the JavaScript bundle that can be injected
-into a viser frontend.
+The package currently supports unbatched/default SMPL, MHR, ANNY, and SOMA
+models. The Rust implementation is checked against Python `body-models` output
+using JSON fixtures, and the Python wheel ships the JavaScript bundle that can
+be injected into a viser frontend.
 
 ## Layout
 
@@ -148,6 +148,8 @@ a GitHub release or running the publish workflow manually.
 ## Notes
 
 The Rust implementation keeps the JSON format simple and builds sparse runtime
-caches for the large sparse MHR matrices on first use. This keeps the generated
-data easy to inspect while making repeated forwards fast enough for interactive
-viewer work.
+caches for large sparse model matrices on first use. SOMA identity preparation
+is intentionally done in Python during reference/model-data export; Rust consumes
+the prepared identity state and handles pose evaluation, correctives, skinning,
+and global translation. This keeps the generated data easy to inspect while
+making repeated forwards fast enough for interactive viewer work.
