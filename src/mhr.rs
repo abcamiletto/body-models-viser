@@ -1,8 +1,8 @@
 use anyhow::Result;
 use glam::{Mat3, Mat4, Quat, Vec3};
 
-use crate::axis_angle_rigid_transform;
 use crate::types::{MhrModel, MhrParams};
+use crate::{axis_angle_rigid_transform, ensure_len};
 
 const LN_2: f32 = std::f32::consts::LN_2;
 
@@ -211,15 +211,6 @@ fn euler_xyz_quat(x: f32, y: f32, z: f32) -> Quat {
         cx * cy * sz - sx * sy * cz,
         cx * cy * cz + sx * sy * sz,
     )
-}
-
-fn ensure_len<T>(values: &[T], len: usize, name: &str) -> Result<()> {
-    anyhow::ensure!(
-        values.len() == len,
-        "expected {name} length {len}, got {}",
-        values.len()
-    );
-    Ok(())
 }
 
 fn dot(a: &[f32], b: &[f32]) -> f32 {

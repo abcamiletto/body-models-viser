@@ -1,8 +1,8 @@
 use anyhow::Result;
-use glam::{Mat3, Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 
-use crate::axis_angle_rigid_transform;
 use crate::types::{SomaModel, SomaParams};
+use crate::{axis_angle_quat, axis_angle_rigid_transform, ensure_len, mat4_from_mat3_translation};
 
 pub fn soma_forward(model: &SomaModel, params: &SomaParams) -> Result<(Vec<Mat4>, Vec<Vec3>)> {
     ensure_len(&params.body_pose, 23, "SOMA body_pose")?;
@@ -171,26 +171,4 @@ fn pack_pose(params: &SomaParams) -> Vec<Vec3> {
     pose.extend_from_slice(&params.hand_pose[24..]);
     pose.extend_from_slice(&params.body_pose[13..]);
     pose
-}
-
-fn mat4_from_mat3_translation(linear: Mat3, translation: Vec3) -> Mat4 {
-    Mat4::from_cols(
-        linear.x_axis.extend(0.0),
-        linear.y_axis.extend(0.0),
-        linear.z_axis.extend(0.0),
-        translation.extend(1.0),
-    )
-}
-
-fn axis_angle_quat(axis_angle: Vec3) -> Quat {
-    Quat::from_axis_angle(axis_angle.normalize_or_zero(), axis_angle.length())
-}
-
-fn ensure_len<T>(values: &[T], len: usize, name: &str) -> Result<()> {
-    anyhow::ensure!(
-        values.len() == len,
-        "expected {name} length {len}, got {}",
-        values.len()
-    );
-    Ok(())
 }

@@ -1,7 +1,8 @@
 use anyhow::Result;
-use glam::{Mat3, Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Vec3};
 
 use crate::types::{AnnyModel, AnnyParams};
+use crate::{axis_angle_quat, ensure_len, mat4_from_mat3_translation};
 
 const PHENOTYPE_ANCHORS: [&[f32]; 8] = [
     &[0.0, 1.0],
@@ -191,26 +192,4 @@ fn pack_pose(params: &AnnyParams) -> Vec<Vec3> {
     pose.extend_from_slice(&params.body_pose[61..]);
     pose.extend_from_slice(&params.head_pose);
     pose
-}
-
-fn mat4_from_mat3_translation(linear: Mat3, translation: Vec3) -> Mat4 {
-    Mat4::from_cols(
-        linear.x_axis.extend(0.0),
-        linear.y_axis.extend(0.0),
-        linear.z_axis.extend(0.0),
-        translation.extend(1.0),
-    )
-}
-
-fn axis_angle_quat(axis_angle: Vec3) -> Quat {
-    Quat::from_axis_angle(axis_angle.normalize_or_zero(), axis_angle.length())
-}
-
-fn ensure_len<T>(values: &[T], len: usize, name: &str) -> Result<()> {
-    anyhow::ensure!(
-        values.len() == len,
-        "expected {name} length {len}, got {}",
-        values.len()
-    );
-    Ok(())
 }

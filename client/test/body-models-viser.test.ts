@@ -47,3 +47,16 @@ test("skinVertices rejects malformed weights", () => {
     /Invalid skinning weights/,
   );
 });
+
+test("skinVertices rejects negative joints", () => {
+  assert.throws(
+    () =>
+      skinVertices({
+        vertices: [[1, 2, 3]],
+        skinWeights: [[0]],
+        skinJoints: [[-1]],
+        boneTransforms: [identity],
+      }),
+    /negative bone/,
+  );
+});

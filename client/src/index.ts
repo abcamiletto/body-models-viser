@@ -2,13 +2,7 @@ export type { Mat4, SkinningInput, Vec3 } from "./generatedTypes";
 
 import type { Mat4, SkinningInput, Vec3 } from "./generatedTypes";
 
-type RuntimeMessage = {
-  type: string;
-  [key: string]: unknown;
-};
-
 type BodyModelMeshMessage = {
-  type: "BodyModelMeshMessage";
   name: string;
   vertices: Vec3[];
   faces: Vec3[];
@@ -27,7 +21,6 @@ type BodyModelMeshMessage = {
 };
 
 type BodyModelPoseMessage = {
-  type: "BodyModelPoseMessage";
   name: string;
   vertices: Vec3[] | null;
   boneTransforms: Mat4[];
@@ -36,8 +29,26 @@ type BodyModelPoseMessage = {
 type ViewerLike = {
   mutable: {
     current: {
-      messageQueue: RuntimeMessage[];
+      messageQueue: MeshMessage[];
     };
+  };
+};
+
+type MeshMessage = {
+  type: "MeshMessage";
+  name: string;
+  props: {
+    vertices: Float32Array;
+    faces: Uint32Array;
+    color: [number, number, number];
+    wireframe: boolean;
+    opacity: number | null;
+    flat_shading: boolean;
+    side: "front" | "back" | "double";
+    material: "standard" | "toon3" | "toon5";
+    scale: number | [number, number, number];
+    cast_shadow: boolean;
+    receive_shadow: boolean | number;
   };
 };
 
@@ -56,13 +67,23 @@ export function skinVertices(input: SkinningInput): Vec3[] {
     for (let slot = 0; slot < weights.length; slot++) {
       const weight = weights[slot]!;
       const point = input.vertices[vertex]!;
-      const transform = input.boneTransforms[joints[slot]!];
-      if (transform === undefined) {
-        throw new Error(`Vertex ${vertex} references missing bone ${joints[slot]}.`);
+      const joint = joints[slot]!;
+      if (joint < 0) {
+        throw new Error(`Vertex ${vertex} references negative bone ${joint}.`);
       }
-      x += weight * (transform[0][0] * point[0] + transform[0][1] * point[1] + transform[0][2] * point[2] + transform[0][3]);
-      y += weight * (transform[1][0] * point[0] + transform[1][1] * point[1] + transform[1][2] * point[2] + transform[1][3]);
-      z += weight * (transform[2][0] * point[0] + transform[2][1] * point[1] + transform[2][2] * point[2] + transform[2][3]);
+      if (weight === 0.0) {
+        continue;
+      }
+      const transform = input.boneTransforms[joint];
+      if (transform === undefined) {
+        throw new Error(`Vertex ${vertex} references missing bone ${joint}.`);
+      }
+      const px = point[0];
+      const py = point[1];
+      const pz = point[2];
+      x += weight * (transform[0][0] * px + transform[0][1] * py + transform[0][2] * pz + transform[0][3]);
+      y += weight * (transform[1][0] * px + transform[1][1] * py + transform[1][2] * pz + transform[1][3]);
+      z += weight * (transform[2][0] * px + transform[2][1] * py + transform[2][2] * pz + transform[2][3]);
     }
     out.push([x, y, z]);
   }
@@ -80,41 +101,22 @@ export function installViserRuntime(): void {
 class BodyModelsViserRuntime {
   private viewer: ViewerLike | null = null;
   private meshes = new Map<string, BodyModelMeshMessage>();
-  private undoQueueIngress: (() => void) | null = null;
-  private disposed = false;
 
-  constructor() {
-    this.installWhenReady();
+  receiveMesh(mesh: BodyModelMeshMessage): void {
+    this.meshes.set(mesh.name, mesh);
+    this.getViewer().mutable.current.messageQueue.push(this.meshMessage(mesh, mesh.vertices, mesh.boneTransforms));
   }
 
-  dispose(): void {
-    this.disposed = true;
-    this.meshes.clear();
-    this.undoQueueIngress?.();
-    this.undoQueueIngress = null;
-    this.viewer = null;
-  }
-
-  private installWhenReady(): void {
-    if (this.disposed) {
-      return;
+  receivePose(pose: BodyModelPoseMessage): void {
+    const mesh = this.meshes.get(pose.name);
+    if (!mesh) {
+      throw new Error(`Body model ${pose.name} has not been created.`);
     }
-    try {
-      const queue = this.getViewer().mutable.current.messageQueue;
-      const push = queue.push.bind(queue);
-      const wrappedPush = (...messages: RuntimeMessage[]): number => {
-        return push(...this.consume(messages));
-      };
-      queue.push = wrappedPush;
-      this.undoQueueIngress = () => {
-        if (queue.push === wrappedPush) {
-          queue.push = push;
-        }
-      };
-      this.drainPending(queue);
-    } catch {
-      window.requestAnimationFrame(() => this.installWhenReady());
+    if (pose.vertices !== null) {
+      mesh.vertices = pose.vertices;
     }
+    mesh.boneTransforms = pose.boneTransforms;
+    this.getViewer().mutable.current.messageQueue.push(this.meshMessage(mesh, mesh.vertices, pose.boneTransforms));
   }
 
   private getViewer(): ViewerLike {
@@ -124,45 +126,11 @@ class BodyModelsViserRuntime {
     return this.viewer;
   }
 
-  private drainPending(queue: RuntimeMessage[]): void {
-    queue.push(...this.consume(queue.splice(0)));
-  }
-
-  private consume(messages: RuntimeMessage[]): RuntimeMessage[] {
-    const out: RuntimeMessage[] = [];
-    for (const message of messages) {
-      switch (message.type) {
-        case "BodyModelMeshMessage": {
-          const mesh = message as BodyModelMeshMessage;
-          this.meshes.set(mesh.name, mesh);
-          out.push(this.meshMessage(mesh, mesh.vertices, mesh.boneTransforms));
-          break;
-        }
-        case "BodyModelPoseMessage": {
-          const pose = message as BodyModelPoseMessage;
-          const mesh = this.meshes.get(pose.name);
-          if (!mesh) {
-            throw new Error(`Body model ${pose.name} has not been created.`);
-          }
-          if (pose.vertices !== null) {
-            mesh.vertices = pose.vertices;
-          }
-          mesh.boneTransforms = pose.boneTransforms;
-          out.push(this.meshMessage(mesh, mesh.vertices, pose.boneTransforms));
-          break;
-        }
-        default:
-          out.push(message);
-      }
-    }
-    return out;
-  }
-
   private meshMessage(
     message: BodyModelMeshMessage,
     vertices: Vec3[],
     boneTransforms: Mat4[],
-  ): RuntimeMessage {
+  ): MeshMessage {
     const skinningLengthMismatch =
       vertices.length !== message.skinWeights.length ||
       vertices.length !== message.skinJoints.length;

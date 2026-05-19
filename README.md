@@ -78,11 +78,12 @@ handle.body_pose = next_body_pose
 `scene.add_mesh_simple()` or `scene.add_mesh_skinned()`; the mesh sent to viser
 is produced by the runtime after browser-side skinning.
 
-`client_path()` returns the packaged `body-models-viser.js` bundle. Advanced
-browser integrations can import the same low-level skinning API directly:
+`client_path()` returns the packaged `body-models-viser.js` runtime used for
+viser injection. Advanced browser integrations can import the same low-level
+skinning API from the ESM bundle built by the TypeScript package:
 
 ```ts
-import { skinVertices } from "./body-models-viser.js";
+import { skinVertices } from "./body-models-viser.module.js";
 
 const vertices = skinVertices({
   vertices: bindVertices,

@@ -1,10 +1,10 @@
 use anyhow::Result;
-use glam::{Mat3, Mat4, Vec3, Vec4};
+use glam::{Mat3, Mat4, Vec3};
 
-use crate::axis_angle_rigid_transform;
 use crate::types::{
     SmplFamilyModel, SmplModel, SmplParams, SmplhModel, SmplhParams, SmplxModel, SmplxParams,
 };
+use crate::{axis_angle_rigid_transform, ensure_len, mat4_from_mat3_translation};
 
 pub fn smpl_forward(model: &SmplModel, params: &SmplParams) -> Result<(Vec<Mat4>, Vec<Vec3>)> {
     ensure_len(&params.shape, 10, "SMPL shape")?;
@@ -216,24 +216,6 @@ fn fk(rotations: &[Mat3], translations: &[Vec3], parents: &[isize]) -> Vec<Mat4>
         };
     }
     world
-}
-
-fn mat4_from_mat3_translation(rotation: Mat3, translation: Vec3) -> Mat4 {
-    Mat4::from_cols(
-        rotation.x_axis.extend(0.0),
-        rotation.y_axis.extend(0.0),
-        rotation.z_axis.extend(0.0),
-        Vec4::new(translation.x, translation.y, translation.z, 1.0),
-    )
-}
-
-fn ensure_len<T>(values: &[T], len: usize, name: &str) -> Result<()> {
-    anyhow::ensure!(
-        values.len() == len,
-        "expected {name} length {len}, got {}",
-        values.len()
-    );
-    Ok(())
 }
 
 fn dot(a: &[f32; 10], b: &[f32]) -> f32 {

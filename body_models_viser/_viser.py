@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import dataclasses
+import json
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
@@ -15,9 +15,9 @@ from body_models.smplh.backends import core as smplh_core
 from body_models.smplx.backends import core as smplx_core
 from body_models.soma import pose as soma_pose
 from body_models.soma.backends import core as soma_core
+from jaxtyping import Float, Int
 from nanomanifold import SO3
 from viser import _messages
-
 
 _HANDLE_TYPES: dict[str, type["ViserBodyHandle"]] = {}
 _IDENTITY_PARAMS = {"gender", "age", "muscle", "weight", "height", "proportions"}
@@ -39,32 +39,6 @@ _VERTEX_PARAMS = {
 }
 
 
-@dataclasses.dataclass
-class BodyModelMeshMessage(_messages.Message, include_in_scene_serialization=True):
-    name: str
-    vertices: list[list[float]]
-    faces: list[list[int]]
-    skinWeights: list[list[float]]
-    skinJoints: list[list[int]]
-    boneTransforms: list[list[list[float]]]
-    color: tuple[int, int, int]
-    wireframe: bool
-    opacity: float | None
-    flatShading: bool
-    side: str
-    material: str
-    scale: float | tuple[float, float, float]
-    castShadow: bool
-    receiveShadow: bool | float
-
-
-@dataclasses.dataclass
-class BodyModelPoseMessage(_messages.Message, include_in_scene_serialization=True):
-    name: str
-    vertices: list[list[float]] | None
-    boneTransforms: list[list[list[float]]]
-
-
 class ViserBodyHandle:
     """Non-rigid body model driven by the body-models-viser browser runtime."""
 
@@ -73,9 +47,14 @@ class ViserBodyHandle:
         scene: Any,
         name: str,
         model: Any,
-        pose: dict[str, np.ndarray],
-        vertices: np.ndarray,
-        base_vertices: np.ndarray,
+        pose: dict[
+            str,
+            Float[np.ndarray, "dim"]
+            | Float[np.ndarray, "items dim"]
+            | Float[np.ndarray, "items rows cols"],
+        ],
+        vertices: Float[np.ndarray, "vertices 3"],
+        base_vertices: Float[np.ndarray, "vertices 3"],
     ) -> None:
         self.scene = scene
         self._name = name
@@ -95,11 +74,11 @@ class ViserBodyHandle:
         return self._name
 
     @property
-    def wxyz(self) -> np.ndarray:
+    def wxyz(self) -> Float[np.ndarray, "4"]:
         return self._wxyz
 
     @wxyz.setter
-    def wxyz(self, value: tuple[float, float, float, float] | np.ndarray) -> None:
+    def wxyz(self, value: tuple[float, float, float, float] | Float[np.ndarray, "4"]) -> None:
         value = np.asarray(value)
         assert value.shape == (4,)
         self._wxyz = value.astype(float, copy=True)
@@ -107,11 +86,11 @@ class ViserBodyHandle:
         self.scene._websock_interface.queue_message(message)
 
     @property
-    def position(self) -> np.ndarray:
+    def position(self) -> Float[np.ndarray, "3"]:
         return self._position
 
     @position.setter
-    def position(self, value: tuple[float, float, float] | np.ndarray) -> None:
+    def position(self, value: tuple[float, float, float] | Float[np.ndarray, "3"]) -> None:
         value = np.asarray(value)
         assert value.shape == (3,)
         self._position = value.astype(float, copy=True)
@@ -129,70 +108,75 @@ class ViserBodyHandle:
         self.scene._websock_interface.queue_message(message)
 
     @property
-    def shape(self) -> np.ndarray:
+    def shape(self) -> Float[np.ndarray, "dim"]:
         return self._param("shape")
 
     @shape.setter
-    def shape(self, value: np.ndarray) -> None:
+    def shape(self, value: Float[np.ndarray, "dim"]) -> None:
         self.set_pose(shape=value)
 
     @property
-    def body_pose(self) -> np.ndarray:
+    def body_pose(self) -> Float[np.ndarray, "joints 3"]:
         return self._param("body_pose")
 
     @body_pose.setter
-    def body_pose(self, value: np.ndarray) -> None:
+    def body_pose(self, value: Float[np.ndarray, "joints 3"]) -> None:
         self.set_pose(body_pose=value)
 
     @property
-    def hand_pose(self) -> np.ndarray:
+    def hand_pose(self) -> Float[np.ndarray, "joints 3"]:
         return self._param("hand_pose")
 
     @hand_pose.setter
-    def hand_pose(self, value: np.ndarray) -> None:
+    def hand_pose(self, value: Float[np.ndarray, "joints 3"]) -> None:
         self.set_pose(hand_pose=value)
 
     @property
-    def head_pose(self) -> np.ndarray:
+    def head_pose(self) -> Float[np.ndarray, "joints 3"]:
         return self._param("head_pose")
 
     @head_pose.setter
-    def head_pose(self, value: np.ndarray) -> None:
+    def head_pose(self, value: Float[np.ndarray, "joints 3"]) -> None:
         self.set_pose(head_pose=value)
 
     @property
-    def expression(self) -> np.ndarray:
+    def expression(self) -> Float[np.ndarray, "dim"]:
         return self._param("expression")
 
     @expression.setter
-    def expression(self, value: np.ndarray) -> None:
+    def expression(self, value: Float[np.ndarray, "dim"]) -> None:
         self.set_pose(expression=value)
 
     @property
-    def global_rotation(self) -> np.ndarray:
+    def global_rotation(self) -> Float[np.ndarray, "3"]:
         return self._param("global_rotation")
 
     @global_rotation.setter
-    def global_rotation(self, value: np.ndarray) -> None:
+    def global_rotation(self, value: Float[np.ndarray, "3"]) -> None:
         self.set_pose(global_rotation=value)
 
     @property
-    def global_translation(self) -> np.ndarray:
+    def global_translation(self) -> Float[np.ndarray, "3"]:
         return self._param("global_translation")
 
     @global_translation.setter
-    def global_translation(self, value: np.ndarray) -> None:
+    def global_translation(self, value: Float[np.ndarray, "3"]) -> None:
         self.set_pose(global_translation=value)
 
     @property
-    def pelvis_rotation(self) -> np.ndarray:
+    def pelvis_rotation(self) -> Float[np.ndarray, "3"]:
         return self._param("pelvis_rotation")
 
     @pelvis_rotation.setter
-    def pelvis_rotation(self, value: np.ndarray) -> None:
+    def pelvis_rotation(self, value: Float[np.ndarray, "3"]) -> None:
         self.set_pose(pelvis_rotation=value)
 
-    def set_pose(self, **forward_kwargs: np.ndarray) -> None:
+    def set_pose(
+        self,
+        **forward_kwargs: Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ) -> None:
         changed: set[str] = set()
         for name, value in forward_kwargs.items():
             current = self._param(name)
@@ -207,7 +191,9 @@ class ViserBodyHandle:
     def remove(self) -> None:
         self.scene._websock_interface.queue_message(_messages.RemoveSceneNodeMessage(self.name))
 
-    def _param(self, name: str) -> np.ndarray:
+    def _param(
+        self, name: str
+    ) -> Float[np.ndarray, "dim"] | Float[np.ndarray, "items dim"] | Float[np.ndarray, "items rows cols"]:
         assert name in self.pose, f"{self.model.__class__.__name__} does not support {name!r}."
         return self.pose[name]
 
@@ -221,12 +207,14 @@ class ViserBodyHandle:
             vertex_payload = np.asarray(self._vertices, dtype=np.float32).tolist()
 
         bone_transforms = _bone_transforms(self.model, self.pose)
-        self.scene._websock_interface.queue_message(
-            BodyModelPoseMessage(
-                self.name,
-                vertex_payload,
-                np.asarray(bone_transforms, dtype=np.float32).tolist(),
-            ),
+        _runtime_call(
+            self.scene,
+            "receivePose",
+            {
+                "name": self.name,
+                "vertices": vertex_payload,
+                "boneTransforms": np.asarray(bone_transforms, dtype=np.float32).tolist(),
+            },
         )
 
 
@@ -289,24 +277,26 @@ def add_body_model(
     vertices = _vertices(model, pose, base_vertices)
     bone_transforms = _bone_transforms(model, pose)
     skin_weights, skin_joints = _sparse_skinning(model)
-    scene._websock_interface.queue_message(
-        BodyModelMeshMessage(
-            name=name,
-            vertices=np.asarray(vertices, dtype=np.float32).tolist(),
-            faces=np.asarray(_triangular_faces(model), dtype=np.int32).tolist(),
-            skinWeights=np.asarray(skin_weights, dtype=np.float32).tolist(),
-            skinJoints=np.asarray(skin_joints, dtype=np.int32).tolist(),
-            boneTransforms=np.asarray(bone_transforms, dtype=np.float32).tolist(),
-            color=color,
-            wireframe=wireframe,
-            opacity=opacity,
-            flatShading=flat_shading,
-            side=side,
-            material=material,
-            scale=scale,
-            castShadow=cast_shadow,
-            receiveShadow=receive_shadow,
-        ),
+    _runtime_call(
+        scene,
+        "receiveMesh",
+        {
+            "name": name,
+            "vertices": np.asarray(vertices, dtype=np.float32).tolist(),
+            "faces": np.asarray(_triangular_faces(model), dtype=np.int32).tolist(),
+            "skinWeights": np.asarray(skin_weights, dtype=np.float32).tolist(),
+            "skinJoints": np.asarray(skin_joints, dtype=np.int32).tolist(),
+            "boneTransforms": np.asarray(bone_transforms, dtype=np.float32).tolist(),
+            "color": color,
+            "wireframe": wireframe,
+            "opacity": opacity,
+            "flatShading": flat_shading,
+            "side": side,
+            "material": material,
+            "scale": scale,
+            "castShadow": cast_shadow,
+            "receiveShadow": receive_shadow,
+        },
     )
     handle_type = _handle_type(model)
     return handle_type(scene, name, model, pose, vertices, base_vertices)
@@ -324,6 +314,11 @@ def _install_runtime(scene: Any) -> None:
     scene._websock_interface.queue_message(_messages.RunJavascriptMessage(_runtime_source()))
 
 
+def _runtime_call(scene: Any, method: str, payload: dict[str, Any]) -> None:
+    source = f"window.__BODY_MODELS_VISER__.{method}({json.dumps(payload, separators=(',', ':'))});"
+    scene._websock_interface.queue_message(_messages.RunJavascriptMessage(source))
+
+
 def _runtime_source() -> str:
     packaged = files(__package__) / "client" / "body-models-viser.js"
     if packaged.is_file():
@@ -333,7 +328,15 @@ def _runtime_source() -> str:
     return development.read_text()
 
 
-def _base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _base_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "vertices 3"]:
     model_name = model.__class__.__name__.lower()
     if model_name == "anny":
         return _anny_base_vertices(model, pose)
@@ -342,25 +345,33 @@ def _base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     if model_name == "smplh":
         return _smpl_base_vertices(model, pose)
     if model_name == "smplx":
-        shape = _as_unbatched_array(pose["shape"])
-        expression = _as_unbatched_array(pose["expression"])
-        return model.weights.v_template + np.einsum(
-            "p,vcp->vc",
-            np.concatenate([shape, expression]),
-            np.concatenate([model.weights.shapedirs[..., : shape.shape[-1]], model.weights.exprdirs[..., : expression.shape[-1]]], axis=-1),
-        )
+        return _smplx_base_vertices(model, pose)
     if model_name == "mhr":
         expression = pose.get("expression")
         if expression is None:
             expression = np.zeros((*pose["shape"].shape[:-1], model.EXPR_DIM), dtype=pose["shape"].dtype)
         coeffs = np.concatenate([pose["shape"], expression], axis=-1)
-        return _as_unbatched_array(model.weights.base_vertices + np.einsum("...i,ivk->...vk", coeffs, model.weights.blendshape_dirs))
+        vertices = model.weights.base_vertices + np.einsum(
+            "...i,ivk->...vk",
+            coeffs,
+            model.weights.blendshape_dirs,
+        )
+        return _as_unbatched_array(vertices)
     if model_name == "soma":
         return _soma_prepared_identity(model, pose).bind_shape_active * 0.01
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
-def _vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+def _vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+    base_vertices: Float[np.ndarray, "vertices 3"],
+) -> Float[np.ndarray, "vertices 3"]:
     model_name = model.__class__.__name__.lower()
     if model_name == "anny":
         return base_vertices
@@ -377,7 +388,15 @@ def _vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
-def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _bone_transforms(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 4 4"]:
     model_name = model.__class__.__name__.lower()
     if model_name == "anny":
         return _anny_bone_transforms(model, pose)
@@ -444,7 +463,15 @@ def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
-def _anny_pose(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _anny_pose(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 3"]:
     return anny_pose.pack_pose(
         np,
         pose["global_rotation"],
@@ -454,7 +481,15 @@ def _anny_pose(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     )
 
 
-def _anny_unskinned(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
+def _anny_unskinned(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> tuple[Float[np.ndarray, "vertices 3"], Float[np.ndarray, "joints 4 4"]]:
     weights = model.weights
     return anny_core.forward_unskinned_vertices(
         template_vertices=weights.template_vertices,
@@ -482,22 +517,77 @@ def _anny_unskinned(model: Any, pose: dict[str, np.ndarray]) -> tuple[np.ndarray
     )
 
 
-def _anny_base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _anny_base_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "vertices 3"]:
     vertices, _ = _anny_unskinned(model, pose)
     return _as_unbatched_array(vertices)
 
 
-def _anny_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _anny_bone_transforms(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 4 4"]:
     _, transforms = _anny_unskinned(model, pose)
-    return _apply_global_transform(transforms, pose.get("global_rotation"), pose.get("global_translation"))
+    return _apply_global_transform(transforms, None, pose.get("global_translation"))
 
 
-def _smpl_base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _smpl_base_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "vertices 3"]:
     shape = _as_unbatched_array(pose["shape"])
     return model.weights.v_template + np.einsum("s,vcs->vc", shape, model.weights.shapedirs[..., : shape.shape[-1]])
 
 
-def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+def _smplx_base_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "vertices 3"]:
+    shape = _as_unbatched_array(pose["shape"])
+    expression = _as_unbatched_array(pose["expression"])
+    coeffs = np.concatenate([shape, expression])
+    dirs = np.concatenate(
+        [
+            model.weights.shapedirs[..., : shape.shape[-1]],
+            model.weights.exprdirs[..., : expression.shape[-1]],
+        ],
+        axis=-1,
+    )
+    return model.weights.v_template + np.einsum("p,vcp->vc", coeffs, dirs)
+
+
+def _smpl_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+    base_vertices: Float[np.ndarray, "vertices 3"],
+) -> Float[np.ndarray, "vertices 3"]:
     _, _, pose_matrices, _ = smpl_core._forward_core(
         xp=np,
         v_template=None,
@@ -517,7 +607,16 @@ def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.nd
     return _as_unbatched_array(vertices)
 
 
-def _smplh_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+def _smplh_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+    base_vertices: Float[np.ndarray, "vertices 3"],
+) -> Float[np.ndarray, "vertices 3"]:
     _, _, pose_matrices, _ = smplh_core._forward_core(
         xp=np,
         v_template=None,
@@ -539,7 +638,16 @@ def _smplh_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.n
     return _as_unbatched_array(vertices)
 
 
-def _smplx_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+def _smplx_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+    base_vertices: Float[np.ndarray, "vertices 3"],
+) -> Float[np.ndarray, "vertices 3"]:
     _, _, pose_matrices, _ = smplx_core._forward_core(
         xp=np,
         v_template=None,
@@ -565,7 +673,10 @@ def _smplx_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.n
     return _as_unbatched_array(vertices)
 
 
-def _smpl_lbs_transforms(skeleton: np.ndarray, joints: np.ndarray) -> np.ndarray:
+def _smpl_lbs_transforms(
+    skeleton: Float[np.ndarray, "joints 4 4"] | Float[np.ndarray, "batch joints 4 4"],
+    joints: Float[np.ndarray, "joints 3"] | Float[np.ndarray, "batch joints 3"],
+) -> Float[np.ndarray, "joints 4 4"]:
     skeleton = _as_unbatched_array(skeleton)
     joints = _as_unbatched_array(joints)
     transforms = np.repeat(np.eye(4, dtype=np.float32)[None], skeleton.shape[0], axis=0)
@@ -574,7 +685,16 @@ def _smpl_lbs_transforms(skeleton: np.ndarray, joints: np.ndarray) -> np.ndarray
     return transforms
 
 
-def _mhr_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
+def _mhr_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+    base_vertices: Float[np.ndarray, "vertices 3"],
+) -> Float[np.ndarray, "vertices 3"]:
     packed_pose = pack_pose(np, pose["body_pose"], pose["hand_pose"])
     _, _, _, joint_params = _mhr_skeleton_core(model, packed_pose)
     vertices = base_vertices + mhr_core.apply_pose_correctives(
@@ -586,7 +706,15 @@ def _mhr_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.nda
     return _as_unbatched_array(vertices)
 
 
-def _mhr_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _mhr_bone_transforms(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 4 4"]:
     weights = model.weights
     packed_pose = pack_pose(np, pose["body_pose"], pose["hand_pose"])
     t_g, r_g, s_g, _ = _mhr_skeleton_core(model, packed_pose)
@@ -600,7 +728,15 @@ def _mhr_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     return _as_unbatched_array(transforms)
 
 
-def _mhr_skeleton_core(model: Any, packed_pose: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _mhr_skeleton_core(
+    model: Any,
+    packed_pose: Float[np.ndarray, "joints parameters"],
+) -> tuple[
+    Float[np.ndarray, "batch joints 3"],
+    Float[np.ndarray, "batch joints 3 3"],
+    Float[np.ndarray, "batch joints 3"],
+    Float[np.ndarray, "batch joints parameters"],
+]:
     return mhr_core._forward_skeleton_core(
         xp=np,
         pose=packed_pose,
@@ -613,7 +749,14 @@ def _mhr_skeleton_core(model: Any, packed_pose: np.ndarray) -> tuple[np.ndarray,
     )
 
 
-def _soma_pose(pose: dict[str, np.ndarray]) -> np.ndarray:
+def _soma_pose(
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 3"]:
     return soma_pose.pack_pose(
         np,
         pose["global_rotation"],
@@ -623,16 +766,32 @@ def _soma_pose(pose: dict[str, np.ndarray]) -> np.ndarray:
     )
 
 
-def _soma_prepared_identity(model: Any, pose: dict[str, np.ndarray]) -> Any:
+def _soma_prepared_identity(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Any:
     return model.prepare_identity(
         identity=pose.get("identity"),
         scale_params=pose.get("scale_params"),
         pose=_soma_pose(pose),
-        cache=False,
+        cache=model.cache_identity,
     )
 
 
-def _soma_pose_rot_full(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _soma_pose_rot_full(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 3 3"] | Float[np.ndarray, "batch joints 3 3"]:
     pose_rot = SO3.convert(_soma_pose(pose), src=model.rotation_type, dst="rotmat", xp=np)
     return soma_core._orient_pose_rot_full(
         np,
@@ -642,14 +801,31 @@ def _soma_pose_rot_full(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     )
 
 
-def _soma_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
-    correctives = soma_core.apply_pose_correctives(model.weights, _soma_pose_rot_full(model, pose), xp=np)
+def _soma_vertices(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+    base_vertices: Float[np.ndarray, "vertices 3"],
+) -> Float[np.ndarray, "vertices 3"]:
+    correctives = model._kernel.apply_pose_correctives(model.weights, _soma_pose_rot_full(model, pose), xp=np)
     if model.weights.vertex_map is not None:
         correctives = correctives[..., model.weights.vertex_map, :]
     return base_vertices + _as_unbatched_array(correctives) * 0.01
 
 
-def _soma_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
+def _soma_bone_transforms(
+    model: Any,
+    pose: dict[
+        str,
+        Float[np.ndarray, "dim"]
+        | Float[np.ndarray, "items dim"]
+        | Float[np.ndarray, "items rows cols"],
+    ],
+) -> Float[np.ndarray, "joints 4 4"]:
     prepared = _soma_prepared_identity(model, pose)
     world_bind_pose = prepared.world_bind_pose
     pose_rot_full = _soma_pose_rot_full(model, pose)
@@ -667,10 +843,10 @@ def _soma_bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray
 
 
 def _apply_global_transform(
-    transforms: np.ndarray,
-    rotation: np.ndarray | None,
-    translation: np.ndarray | None,
-) -> np.ndarray:
+    transforms: Float[np.ndarray, "joints 4 4"] | Float[np.ndarray, "batch joints 4 4"],
+    rotation: Float[np.ndarray, "3"] | Float[np.ndarray, "batch 3"] | None,
+    translation: Float[np.ndarray, "3"] | Float[np.ndarray, "batch 3"] | None,
+) -> Float[np.ndarray, "joints 4 4"] | Float[np.ndarray, "batch joints 4 4"]:
     if rotation is None and translation is None:
         return transforms
 
@@ -682,14 +858,16 @@ def _apply_global_transform(
     return np.einsum("ij,...jk->...ik", global_transform, transforms)
 
 
-def _as_unbatched_array(value: Any) -> np.ndarray:
+def _as_unbatched_array(
+    value: Any,
+) -> Float[np.ndarray, "dim"] | Float[np.ndarray, "items dim"] | Float[np.ndarray, "items rows cols"]:
     if hasattr(value, "detach"):
         value = value.detach().cpu().numpy()
     value = np.asarray(value)
     return value[0] if value.ndim >= 2 and value.shape[0] == 1 else value
 
 
-def _triangular_faces(model: Any) -> np.ndarray:
+def _triangular_faces(model: Any) -> Int[np.ndarray, "faces 3"]:
     faces = np.asarray(model.faces, dtype=np.uint32)
     if faces.shape[1] == 3:
         return faces
@@ -698,22 +876,33 @@ def _triangular_faces(model: Any) -> np.ndarray:
     raise ValueError(f"Expected triangular or quad faces, got {faces.shape}.")
 
 
-def _sparse_skinning(model: Any) -> tuple[np.ndarray, np.ndarray]:
+def _sparse_skinning(
+    model: Any,
+) -> tuple[Float[np.ndarray, "vertices influences"], Int[np.ndarray, "vertices influences"]]:
     model_name = model.__class__.__name__.lower()
     if model_name == "soma":
-        indices = model.weights.skin_joint_indices_active - 1
-        return model.weights.skin_joint_weights_active, indices
+        indices = model.weights.skin_joint_indices_active.copy()
+        indices[indices >= 0] -= 1
+        return _compact_skinning(model.weights.skin_joint_weights_active, indices)
 
     if hasattr(model.weights, "skin_indices") and hasattr(model.weights, "skin_weights"):
         return model.weights.skin_weights, model.weights.skin_indices
 
     dense = np.asarray(model.skin_weights)
-    skin_joints: list[np.ndarray] = []
-    skin_weights: list[np.ndarray] = []
-    for row in dense:
-        joints = np.flatnonzero(row)
-        skin_joints.append(joints)
-        skin_weights.append(row[joints])
+    return _compact_skinning(dense, np.broadcast_to(np.arange(dense.shape[1]), dense.shape))
+
+
+def _compact_skinning(
+    weights: Float[np.ndarray, "vertices source_influences"],
+    joints: Int[np.ndarray, "vertices source_influences"],
+) -> tuple[Float[np.ndarray, "vertices influences"], Int[np.ndarray, "vertices influences"]]:
+    skin_joints: list[Int[np.ndarray, "influences"]] = []
+    skin_weights: list[Float[np.ndarray, "influences"]] = []
+    for weight_row, joint_row in zip(weights, joints):
+        active = np.flatnonzero(weight_row)
+        skin_weights.append(weight_row[active])
+        skin_joints.append(joint_row[active])
+
     max_len = max(len(row) for row in skin_joints)
     joints_out = np.zeros((len(skin_joints), max_len), dtype=np.int32)
     weights_out = np.zeros((len(skin_weights), max_len), dtype=np.float32)

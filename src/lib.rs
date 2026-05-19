@@ -5,7 +5,7 @@ mod soma;
 mod types;
 
 use anyhow::{Context, Result, bail};
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -22,10 +22,29 @@ pub fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
 }
 
 pub(crate) fn axis_angle_rigid_transform(rotation: Vec3, translation: Vec3) -> Mat4 {
-    Mat4::from_rotation_translation(
-        Quat::from_axis_angle(rotation.normalize_or_zero(), rotation.length()),
-        translation,
+    Mat4::from_rotation_translation(axis_angle_quat(rotation), translation)
+}
+
+pub(crate) fn axis_angle_quat(rotation: Vec3) -> Quat {
+    Quat::from_axis_angle(rotation.normalize_or_zero(), rotation.length())
+}
+
+pub(crate) fn mat4_from_mat3_translation(linear: Mat3, translation: Vec3) -> Mat4 {
+    Mat4::from_cols(
+        linear.x_axis.extend(0.0),
+        linear.y_axis.extend(0.0),
+        linear.z_axis.extend(0.0),
+        translation.extend(1.0),
     )
+}
+
+pub(crate) fn ensure_len<T>(values: &[T], len: usize, name: &str) -> Result<()> {
+    anyhow::ensure!(
+        values.len() == len,
+        "expected {name} length {len}, got {}",
+        values.len()
+    );
+    Ok(())
 }
 
 pub fn run_fixture(model_data_dir: &Path, fixture_path: &Path) -> Result<ModelOutput> {
