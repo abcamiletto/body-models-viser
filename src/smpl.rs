@@ -1,6 +1,7 @@
 use anyhow::Result;
 use glam::{Mat3, Mat4, Vec3, Vec4};
 
+use crate::axis_angle_rigid_transform;
 use crate::types::{SmplModel, SmplParams};
 
 pub fn smpl_forward(model: &SmplModel, params: &SmplParams) -> Result<(Vec<Mat4>, Vec<Vec3>)> {
@@ -27,13 +28,7 @@ pub fn smpl_forward(model: &SmplModel, params: &SmplParams) -> Result<(Vec<Mat4>
     let mut mesh = posed_vertices(model, params, &pose);
     skin_vertices(model, &joints, &skeleton, &mut mesh);
 
-    let global = Mat4::from_rotation_translation(
-        glam::Quat::from_axis_angle(
-            params.global_rotation.normalize_or_zero(),
-            params.global_rotation.length(),
-        ),
-        params.global_translation,
-    );
+    let global = axis_angle_rigid_transform(params.global_rotation, params.global_translation);
     for vertex in &mut mesh {
         *vertex = global.transform_point3(*vertex);
     }

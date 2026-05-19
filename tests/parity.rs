@@ -61,3 +61,12 @@ fn smpl_matches_python_reference() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn mhr_matches_python_reference() -> Result<()> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for name in ["rest", "shape_pose", "translation"] {
+        check_case(&root, "mhr", name, 2e-4)?;
+    }
+    Ok(())
+}
