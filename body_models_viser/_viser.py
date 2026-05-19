@@ -8,9 +8,20 @@ from typing import Any
 import numpy as np
 from body_models.mhr.backends import core as mhr_core
 from body_models.mhr.pose import pack_pose
-from body_models.smpl.backends.core import _forward_core as smpl_forward_core
+from body_models.smpl.backends import core as smpl_core
 from nanomanifold import SO3
 from viser import _messages
+
+
+_HANDLE_TYPES: dict[str, type["ViserBodyHandle"]] = {}
+_BASE_VERTEX_PARAMS = {
+    "smpl": {"shape"},
+    "mhr": {"shape", "expression"},
+}
+_VERTEX_PARAMS = {
+    "smpl": {"shape", "body_pose"},
+    "mhr": {"shape", "body_pose", "hand_pose", "expression"},
+}
 
 
 @dataclasses.dataclass
@@ -54,7 +65,9 @@ class ViserBodyHandle:
         self.scene = scene
         self._name = name
         self.model = model
-        self.model_name = model.__class__.__name__
+        self.model_name = model.__class__.__name__.lower()
+        self._base_vertex_params = _BASE_VERTEX_PARAMS[self.model_name]
+        self._vertex_params = _VERTEX_PARAMS[self.model_name]
         self.pose = pose
         self._vertices = vertices
         self._base_vertices = base_vertices
@@ -180,15 +193,15 @@ class ViserBodyHandle:
         self.scene._websock_interface.queue_message(_messages.RemoveSceneNodeMessage(self.name))
 
     def _param(self, name: str) -> np.ndarray:
-        assert name in self.pose, f"{self.model_name} does not support {name!r}."
+        assert name in self.pose, f"{self.model.__class__.__name__} does not support {name!r}."
         return self.pose[name]
 
     def _apply_pose(self, changed: set[str]) -> None:
-        if changed & _base_vertex_params(self.model):
+        if changed & self._base_vertex_params:
             self._base_vertices = _base_vertices(self.model, self.pose)
 
         vertex_payload = None
-        if changed & _vertex_params(self.model):
+        if changed & self._vertex_params:
             self._vertices = _vertices(self.model, self.pose, self._base_vertices)
             vertex_payload = np.asarray(self._vertices, dtype=np.float32).tolist()
 
@@ -208,6 +221,12 @@ class SmplBodyHandle(ViserBodyHandle):
 
 class MhrBodyHandle(ViserBodyHandle):
     pass
+
+
+_HANDLE_TYPES.update({
+    "smpl": SmplBodyHandle,
+    "mhr": MhrBodyHandle,
+})
 
 
 def add_body_model(
@@ -260,11 +279,10 @@ def add_body_model(
 
 def _handle_type(model: Any) -> type[ViserBodyHandle]:
     model_name = model.__class__.__name__.lower()
-    if model_name == "smpl":
-        return SmplBodyHandle
-    if model_name == "mhr":
-        return MhrBodyHandle
-    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
+    try:
+        return _HANDLE_TYPES[model_name]
+    except KeyError:
+        raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.") from None
 
 
 def _install_runtime(scene: Any) -> None:
@@ -278,24 +296,6 @@ def _runtime_source() -> str:
 
     development = Path(__file__).resolve().parents[1] / "client" / "dist" / "body-models-viser.js"
     return development.read_text()
-
-
-def _base_vertex_params(model: Any) -> set[str]:
-    model_name = model.__class__.__name__.lower()
-    if model_name == "smpl":
-        return {"shape"}
-    if model_name == "mhr":
-        return {"shape", "expression"}
-    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
-
-
-def _vertex_params(model: Any) -> set[str]:
-    model_name = model.__class__.__name__.lower()
-    if model_name == "smpl":
-        return {"shape", "body_pose"}
-    if model_name == "mhr":
-        return {"shape", "body_pose", "hand_pose", "expression"}
-    raise ValueError(f"Unsupported body model {model.__class__.__name__!r}.")
 
 
 def _base_vertices(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
@@ -324,7 +324,7 @@ def _vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray
 def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
     model_name = model.__class__.__name__.lower()
     if model_name == "smpl":
-        _, joints, _, _ = smpl_forward_core(
+        _, joints, _, _ = smpl_core._forward_core(
             xp=np,
             v_template=None,
             shapedirs=None,
@@ -345,7 +345,7 @@ def _bone_transforms(model: Any, pose: dict[str, np.ndarray]) -> np.ndarray:
 
 
 def _smpl_vertices(model: Any, pose: dict[str, np.ndarray], base_vertices: np.ndarray) -> np.ndarray:
-    _, _, pose_matrices, _ = smpl_forward_core(
+    _, _, pose_matrices, _ = smpl_core._forward_core(
         xp=np,
         v_template=None,
         shapedirs=None,
