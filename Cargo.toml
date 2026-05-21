@@ -1,15 +1,10 @@
 [package]
 name = "body-models-viser"
-version = "0.1.0"
+version = "0.0.2"
 edition = "2024"
 
-[dependencies]
-anyhow = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-glam = { version = "0.32.1", features = ["serde"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+[lib]
+crate-type = ["cdylib", "rlib"]
 
-[[bin]]
-name = "body-models-viser"
-path = "src/main.rs"
+[dependencies]
+glam = "0.32.1"

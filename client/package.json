@@ -3,24 +3,18 @@
   "version": "0.0.2",
   "private": true,
   "type": "module",
-  "main": "./dist/body-models-viser.module.js",
-  "module": "./dist/body-models-viser.module.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/body-models-viser.module.js"
-    }
-  },
   "scripts": {
-    "generate-types": "json2ts -i schema/skinning.schema.json -o src/generatedTypes.ts --bannerComment \"// AUTOMATICALLY GENERATED from schema/skinning.schema.json. Do not edit.\"",
-    "build": "npm run generate-types && esbuild src/index.ts --bundle --format=iife --global-name=BodyModelsViser --target=es2022 --outfile=dist/body-models-viser.js && esbuild src/index.ts --bundle --format=esm --target=es2022 --outfile=dist/body-models-viser.module.js && tsc --emitDeclarationOnly",
-    "test": "npm run build && esbuild test/body-models-viser.test.ts --bundle --platform=node --format=esm --target=es2022 --outfile=dist/body-models-viser.test.mjs && node --test dist/body-models-viser.test.mjs",
+    "build:wasm": "PATH=\"$HOME/.cargo/bin:$PATH\" cargo build --manifest-path ../Cargo.toml --release --target wasm32-unknown-unknown",
+    "build": "npm run build:wasm && esbuild src/index.ts --bundle --format=iife --global-name=BodyModelsViser --target=es2022 --outfile=dist/body-models-viser.js && cp ../target/wasm32-unknown-unknown/release/body_models_viser.wasm dist/body-models-viser.wasm && mkdir -p ../body_models_viser/client && cp dist/body-models-viser.js dist/body-models-viser.wasm ../body_models_viser/client/",
+    "test": "npm run build",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/ndarray": "^1.0.14",
     "esbuild": "^0.25.12",
-    "json-schema-to-typescript": "^15.0.4",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "ndarray": "^1.0.19"
   }
 }

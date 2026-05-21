@@ -22,11 +22,13 @@ jobs:
           cache: npm
           cache-dependency-path: client/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - name: Check Rust
         run: |
           cargo fmt --check
-          cargo clippy --release --lib --bins -- -D warnings
-          cargo test --release --lib --bins
+          cargo clippy --release --lib -- -D warnings
+          cargo test --release --lib
       - name: Build client
         run: |
           cd client

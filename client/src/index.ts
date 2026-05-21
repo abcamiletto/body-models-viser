@@ -1,188 +1,252 @@
-export type { Mat4, SkinningInput, Vec3 } from "./generatedTypes";
+import ndarray from "ndarray";
 
-import type { Mat4, SkinningInput, Vec3 } from "./generatedTypes";
-
-type BodyModelMeshMessage = {
-  name: string;
-  vertices: Vec3[];
-  faces: Vec3[];
-  skinWeights: number[][];
-  skinJoints: number[][];
-  boneTransforms: Mat4[];
+type MeshProps = {
   color: [number, number, number];
   wireframe: boolean;
   opacity: number | null;
-  flatShading: boolean;
+  flat_shading: boolean;
   side: "front" | "back" | "double";
   material: "standard" | "toon3" | "toon5";
   scale: number | [number, number, number];
-  castShadow: boolean;
-  receiveShadow: boolean | number;
+  cast_shadow: boolean;
+  receive_shadow: boolean | number;
 };
 
-type BodyModelPoseMessage = {
+type AddSmplMessage = {
+  type: "BodyModelsViserSmplMessage";
   name: string;
-  vertices: Vec3[] | null;
-  boneTransforms: Mat4[];
+  vertex_count: number;
+  face_count: number;
+  lbs_weights: Float32Array;
+  faces: Uint32Array;
+  rest_joints: Float32Array;
+  rest_vertices: Float32Array;
+  joint_transforms: Float32Array;
+  pose_offsets: Float32Array;
+  global_rotation: Float32Array;
+  global_translation: Float32Array;
+  props: MeshProps;
 };
 
-type ViewerLike = {
-  mutable: {
-    current: {
-      messageQueue: MeshMessage[];
-    };
-  };
+type PoseMessage = {
+  type: "BodyModelsViserPoseMessage";
+  name: string;
+  rest_joints: Float32Array | null;
+  rest_vertices: Float32Array | null;
+  joint_transforms: Float32Array | null;
+  pose_offsets: Float32Array | null;
+  global_rotation: Float32Array;
+  global_translation: Float32Array;
 };
 
 type MeshMessage = {
   type: "MeshMessage";
   name: string;
-  props: {
+  props: MeshProps & {
     vertices: Float32Array;
     faces: Uint32Array;
-    color: [number, number, number];
-    wireframe: boolean;
-    opacity: number | null;
-    flat_shading: boolean;
-    side: "front" | "back" | "double";
-    material: "standard" | "toon3" | "toon5";
-    scale: number | [number, number, number];
-    cast_shadow: boolean;
-    receive_shadow: boolean | number;
   };
 };
 
-export function skinVertices(input: SkinningInput): Vec3[] {
-  const out: Vec3[] = [];
-  for (let vertex = 0; vertex < input.vertices.length; vertex++) {
-    const weights = input.skinWeights[vertex];
-    const joints = input.skinJoints[vertex];
-    if (weights === undefined || joints === undefined || weights.length !== joints.length) {
-      throw new Error(`Invalid skinning weights for vertex ${vertex}.`);
-    }
+type Message = AddSmplMessage | PoseMessage | MeshMessage | { type: string };
 
-    let x = 0.0;
-    let y = 0.0;
-    let z = 0.0;
-    for (let slot = 0; slot < weights.length; slot++) {
-      const weight = weights[slot]!;
-      const point = input.vertices[vertex]!;
-      const joint = joints[slot]!;
-      if (joint < 0) {
-        throw new Error(`Vertex ${vertex} references negative bone ${joint}.`);
-      }
-      if (weight === 0.0) {
-        continue;
-      }
-      const transform = input.boneTransforms[joint];
-      if (transform === undefined) {
-        throw new Error(`Vertex ${vertex} references missing bone ${joint}.`);
-      }
-      const px = point[0];
-      const py = point[1];
-      const pz = point[2];
-      x += weight * (transform[0][0] * px + transform[0][1] * py + transform[0][2] * pz + transform[0][3]);
-      y += weight * (transform[1][0] * px + transform[1][1] * py + transform[1][2] * pz + transform[1][3]);
-      z += weight * (transform[2][0] * px + transform[2][1] * py + transform[2][2] * pz + transform[2][3]);
-    }
-    out.push([x, y, z]);
-  }
-  return out;
-}
+type ViewerLike = {
+  mutable: {
+    current: {
+      messageQueue: Message[];
+    };
+  };
+};
 
-export function installViserRuntime(): void {
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return;
-  }
+type WasmExports = {
+  memory: WebAssembly.Memory;
+  alloc(size: number): number;
+  wasm_free(ptr: number, len: number): void;
+  output_free(handle: bigint): void;
+  smpl_create(
+    lbsWeightsPtr: number,
+    lbsWeightsLen: number,
+    restJointsPtr: number,
+    restJointsLen: number,
+    restVerticesPtr: number,
+    restVerticesLen: number,
+    jointTransformsPtr: number,
+    jointTransformsLen: number,
+    poseOffsetsPtr: number,
+    poseOffsetsLen: number,
+    globalRotationPtr: number,
+    globalTranslationPtr: number,
+  ): number;
+  smpl_set_identity(
+    model: number,
+    restJointsPtr: number,
+    restJointsLen: number,
+    restVerticesPtr: number,
+    restVerticesLen: number,
+  ): void;
+  smpl_set_pose(
+    model: number,
+    jointTransformsPtr: number,
+    jointTransformsLen: number,
+    poseOffsetsPtr: number,
+    poseOffsetsLen: number,
+  ): void;
+  smpl_set_global(model: number, globalRotationPtr: number, globalTranslationPtr: number): void;
+  smpl_forward(model: number): bigint;
+};
 
-  runtimeWindow().__BODY_MODELS_VISER__ ??= new BodyModelsViserRuntime();
-}
+type WasmInput = { ptr: number; byteLen: number; len: number };
+type MeshState = { model: number; vertexCount: number; faces: Uint32Array; props: MeshProps };
 
 class BodyModelsViserRuntime {
+  private wasm: WasmExports | null = null;
   private viewer: ViewerLike | null = null;
-  private meshes = new Map<string, BodyModelMeshMessage>();
+  private meshes = new Map<string, MeshState>();
 
-  receiveMesh(mesh: BodyModelMeshMessage): void {
-    this.meshes.set(mesh.name, mesh);
-    this.getViewer().mutable.current.messageQueue.push(this.meshMessage(mesh, mesh.vertices, mesh.boneTransforms));
+  install(wasmBase64: string): void {
+    const bytes = Uint8Array.from(atob(wasmBase64), (char) => char.charCodeAt(0));
+    const module = new WebAssembly.Module(bytes.buffer as ArrayBuffer);
+    const instance = new WebAssembly.Instance(module);
+    this.wasm = instance.exports as WasmExports;
+    this.patchMessageQueue();
   }
 
-  receivePose(pose: BodyModelPoseMessage): void {
-    const mesh = this.meshes.get(pose.name);
-    if (!mesh) {
-      throw new Error(`Body model ${pose.name} has not been created.`);
+  consume(message: Message): boolean {
+    if (message.type === "BodyModelsViserSmplMessage") {
+      this.addSmpl(message as AddSmplMessage);
+      return true;
     }
-    if (pose.vertices !== null) {
-      mesh.vertices = pose.vertices;
+    if (message.type === "BodyModelsViserPoseMessage") {
+      this.setPose(message as PoseMessage);
+      return true;
     }
-    mesh.boneTransforms = pose.boneTransforms;
-    this.getViewer().mutable.current.messageQueue.push(this.meshMessage(mesh, mesh.vertices, pose.boneTransforms));
+    return false;
+  }
+
+  private addSmpl(message: AddSmplMessage): void {
+    const wasm = this.requireWasm();
+    const lbsWeights = this.writeArray(float32(message.lbs_weights, [message.vertex_count, 24]));
+    const restJoints = this.writeArray(float32(message.rest_joints, [24, 3]));
+    const restVertices = this.writeArray(float32(message.rest_vertices, [message.vertex_count, 3]));
+    const jointTransforms = this.writeArray(float32(message.joint_transforms, [24, 4, 4]));
+    const poseOffsets = this.writeArray(float32(message.pose_offsets, [message.vertex_count, 3]));
+    const globalRotation = this.writeArray(float32(message.global_rotation, [3]));
+    const globalTranslation = this.writeArray(float32(message.global_translation, [3]));
+    const model = wasm.smpl_create(
+      lbsWeights.ptr,
+      lbsWeights.len,
+      restJoints.ptr,
+      restJoints.len,
+      restVertices.ptr,
+      restVertices.len,
+      jointTransforms.ptr,
+      jointTransforms.len,
+      poseOffsets.ptr,
+      poseOffsets.len,
+      globalRotation.ptr,
+      globalTranslation.ptr,
+    );
+    [lbsWeights, restJoints, restVertices, jointTransforms, poseOffsets, globalRotation, globalTranslation].forEach(
+      (input) => this.free(input),
+    );
+    this.meshes.set(message.name, {
+      model,
+      vertexCount: message.vertex_count,
+      faces: uint32(message.faces, [message.face_count, 3]).data,
+      props: message.props,
+    });
+    this.pushMesh(message.name);
+  }
+
+  private setPose(message: PoseMessage): void {
+    const mesh = this.meshes.get(message.name);
+    if (mesh === undefined) {
+      throw new Error(`SMPL ${message.name} has not been created.`);
+    }
+    const wasm = this.requireWasm();
+    if (message.rest_joints !== null && message.rest_vertices !== null) {
+      const restJoints = this.writeArray(float32(message.rest_joints, [24, 3]));
+      const restVertices = this.writeArray(float32(message.rest_vertices, [mesh.vertexCount, 3]));
+      wasm.smpl_set_identity(mesh.model, restJoints.ptr, restJoints.len, restVertices.ptr, restVertices.len);
+      this.free(restJoints);
+      this.free(restVertices);
+    }
+    if (message.joint_transforms !== null && message.pose_offsets !== null) {
+      const jointTransforms = this.writeArray(float32(message.joint_transforms, [24, 4, 4]));
+      const poseOffsets = this.writeArray(float32(message.pose_offsets, [message.pose_offsets.length / 3, 3]));
+      wasm.smpl_set_pose(mesh.model, jointTransforms.ptr, jointTransforms.len, poseOffsets.ptr, poseOffsets.len);
+      this.free(jointTransforms);
+      this.free(poseOffsets);
+    }
+    const globalRotation = this.writeArray(float32(message.global_rotation, [3]));
+    const globalTranslation = this.writeArray(float32(message.global_translation, [3]));
+    wasm.smpl_set_global(mesh.model, globalRotation.ptr, globalTranslation.ptr);
+    this.free(globalRotation);
+    this.free(globalTranslation);
+    this.pushMesh(message.name);
+  }
+
+  private pushMesh(name: string): void {
+    const mesh = this.meshes.get(name);
+    if (mesh === undefined) {
+      throw new Error(`SMPL ${name} has not been created.`);
+    }
+    const wasm = this.requireWasm();
+    const output = wasm.smpl_forward(mesh.model);
+    const vertices = this.readFloat32Output(output);
+    wasm.output_free(output);
+    this.getViewer().mutable.current.messageQueue.push({
+      type: "MeshMessage",
+      name,
+      props: { ...mesh.props, vertices, faces: mesh.faces },
+    });
+  }
+
+  private writeArray(array: ndarray.NdArray<Float32Array | Uint32Array>): WasmInput {
+    const wasm = this.requireWasm();
+    const bytes = new Uint8Array(array.data.buffer, array.data.byteOffset, array.data.byteLength);
+    const ptr = wasm.alloc(bytes.byteLength);
+    new Uint8Array(wasm.memory.buffer, ptr, bytes.byteLength).set(bytes);
+    return { ptr, byteLen: bytes.byteLength, len: array.data.length };
+  }
+
+  private readFloat32Output(handle: bigint): Float32Array {
+    const wasm = this.requireWasm();
+    const ptr = Number(handle >> 32n);
+    const len = Number(handle & 0xffffffffn);
+    return new Float32Array(new Float32Array(wasm.memory.buffer, ptr, len));
+  }
+
+  private free(input: WasmInput): void {
+    this.requireWasm().wasm_free(input.ptr, input.byteLen);
+  }
+
+  private requireWasm(): WasmExports {
+    if (this.wasm === null) {
+      throw new Error("body-models-viser WASM is not installed.");
+    }
+    return this.wasm;
   }
 
   private getViewer(): ViewerLike {
-    if (!this.viewer) {
-      this.viewer = findViewer();
-    }
+    this.viewer ??= findViewer();
     return this.viewer;
   }
 
-  private meshMessage(
-    message: BodyModelMeshMessage,
-    vertices: Vec3[],
-    boneTransforms: Mat4[],
-  ): MeshMessage {
-    const skinningLengthMismatch =
-      vertices.length !== message.skinWeights.length ||
-      vertices.length !== message.skinJoints.length;
-    if (skinningLengthMismatch) {
-      throw new Error(`Body model ${message.name} has inconsistent vertex skinning data.`);
-    }
-    const skinned = skinVertices({
-      vertices,
-      skinWeights: message.skinWeights,
-      skinJoints: message.skinJoints,
-      boneTransforms,
-    });
-    return {
-      type: "MeshMessage",
-      name: message.name,
-      props: {
-        vertices: flattenFloat32(skinned),
-        faces: flattenUint32(message.faces),
-        color: message.color,
-        wireframe: message.wireframe,
-        opacity: message.opacity,
-        flat_shading: message.flatShading,
-        side: message.side,
-        material: message.material,
-        scale: message.scale,
-        cast_shadow: message.castShadow,
-        receive_shadow: message.receiveShadow,
-      },
-    };
+  private patchMessageQueue(): void {
+    const viewer = this.getViewer();
+    const queue = viewer.mutable.current.messageQueue;
+    const push = queue.push.bind(queue);
+    queue.push = (...messages: Message[]) => push(...messages.filter((message) => !this.consume(message)));
   }
 }
 
-function flattenFloat32(values: Vec3[]): Float32Array {
-  const out = new Float32Array(values.length * 3);
-  for (let i = 0; i < values.length; i++) {
-    const value = values[i]!;
-    out[3 * i] = value[0];
-    out[3 * i + 1] = value[1];
-    out[3 * i + 2] = value[2];
-  }
-  return out;
+function float32(data: Float32Array, shape: number[]): ndarray.NdArray<Float32Array> {
+  return ndarray(data, shape);
 }
 
-function flattenUint32(values: Vec3[]): Uint32Array {
-  const out = new Uint32Array(values.length * 3);
-  for (let i = 0; i < values.length; i++) {
-    const value = values[i]!;
-    out[3 * i] = value[0];
-    out[3 * i + 1] = value[1];
-    out[3 * i + 2] = value[2];
-  }
-  return out;
+function uint32(data: Uint32Array, shape: number[]): ndarray.NdArray<Uint32Array> {
+  return ndarray(data, shape);
 }
 
 type ReactFiberNode = {
@@ -195,12 +259,9 @@ type ReactFiberNode = {
 
 function findViewer(): ViewerLike {
   const root = document.getElementById("root") as Record<string, unknown> | null;
-  const key = root
-    ? Object.keys(root).find((candidate) => candidate.startsWith("__reactContainer$"))
-    : undefined;
-  const reactRoot = key ? (root![key] as ReactFiberNode) : null;
+  const key = root ? Object.keys(root).find((candidate) => candidate.startsWith("__reactContainer$")) : undefined;
+  const stack = key ? [root![key] as ReactFiberNode] : [];
   const seen = new Set<unknown>();
-  const stack = reactRoot ? [reactRoot] : [];
 
   while (stack.length > 0) {
     const fiber = stack.pop();
@@ -208,9 +269,8 @@ function findViewer(): ViewerLike {
       continue;
     }
     seen.add(fiber);
-    const value = fiber.memoizedProps?.value;
-    if (isViewerLike(value)) {
-      return value;
+    if (isViewerLike(fiber.memoizedProps?.value)) {
+      return fiber.memoizedProps.value;
     }
     if (fiber.child) {
       stack.push(fiber.child);
@@ -219,19 +279,19 @@ function findViewer(): ViewerLike {
       stack.push(fiber.sibling);
     }
   }
-  throw new Error("[body-models-viser] Could not locate the viser viewer.");
+  throw new Error("Could not locate the viser viewer.");
 }
 
 function isViewerLike(value: unknown): value is ViewerLike {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Partial<ViewerLike>;
-  return Array.isArray(candidate.mutable?.current?.messageQueue);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as Partial<ViewerLike>).mutable?.current?.messageQueue)
+  );
 }
 
-function runtimeWindow(): Window & { __BODY_MODELS_VISER__?: BodyModelsViserRuntime } {
-  return window as Window & { __BODY_MODELS_VISER__?: BodyModelsViserRuntime };
-}
+const runtime = new BodyModelsViserRuntime();
 
-installViserRuntime();
+export function install(wasmBase64: string): void {
+  runtime.install(wasmBase64);
+}

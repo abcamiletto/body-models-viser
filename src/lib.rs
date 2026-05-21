@@ -1,97 +1,205 @@
-mod anny;
-mod mhr;
 mod smpl;
-mod soma;
-mod types;
 
-use anyhow::{Context, Result, bail};
-use glam::{Mat3, Mat4, Quat, Vec3};
-use serde::Deserialize;
-use std::fs;
-use std::path::Path;
+use glam::{Mat4, Vec3};
+use std::cell::RefCell;
 
-pub use anny::anny_forward;
-pub use mhr::mhr_forward;
-pub use smpl::{smpl_forward, smplh_forward, smplx_forward};
-pub use soma::soma_forward;
-pub use types::*;
-
-pub fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
-    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))
+struct SmplRuntimeModel {
+    model: smpl::Model,
+    identity: smpl::Identity,
+    pose: smpl::Pose,
 }
 
-pub(crate) fn axis_angle_rigid_transform(rotation: Vec3, translation: Vec3) -> Mat4 {
-    Mat4::from_rotation_translation(axis_angle_quat(rotation), translation)
+thread_local! {
+    static SMPL_MODELS: RefCell<Vec<SmplRuntimeModel>> = const { RefCell::new(Vec::new()) };
 }
 
-pub(crate) fn axis_angle_quat(rotation: Vec3) -> Quat {
-    Quat::from_axis_angle(rotation.normalize_or_zero(), rotation.length())
+#[unsafe(no_mangle)]
+pub extern "C" fn alloc(len: usize) -> *mut u8 {
+    let mut bytes = Vec::<u8>::with_capacity(len);
+    let ptr = bytes.as_mut_ptr();
+    std::mem::forget(bytes);
+    ptr
 }
 
-pub(crate) fn mat4_from_mat3_translation(linear: Mat3, translation: Vec3) -> Mat4 {
-    Mat4::from_cols(
-        linear.x_axis.extend(0.0),
-        linear.y_axis.extend(0.0),
-        linear.z_axis.extend(0.0),
-        translation.extend(1.0),
-    )
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `ptr` must come from `alloc(len)` and must not be used after this call.
+pub unsafe extern "C" fn wasm_free(ptr: *mut u8, len: usize) {
+    drop(unsafe { Vec::from_raw_parts(ptr, 0, len) });
 }
 
-pub(crate) fn ensure_len<T>(values: &[T], len: usize, name: &str) -> Result<()> {
-    anyhow::ensure!(
-        values.len() == len,
-        "expected {name} length {len}, got {}",
-        values.len()
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// `handle` must come from a Rust function in this module that returns output.
+pub unsafe extern "C" fn output_free(handle: u64) {
+    let (ptr, len) = unpack(handle);
+    drop(unsafe { Vec::from_raw_parts(ptr as *mut f32, 0, len) });
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// All pointers must refer to valid contiguous buffers for the given lengths.
+pub unsafe extern "C" fn smpl_create(
+    lbs_weights_ptr: *const f32,
+    lbs_weights_len: usize,
+    rest_joints_ptr: *const f32,
+    rest_joints_len: usize,
+    rest_vertices_ptr: *const f32,
+    rest_vertices_len: usize,
+    joint_transforms_ptr: *const f32,
+    joint_transforms_len: usize,
+    pose_offsets_ptr: *const f32,
+    pose_offsets_len: usize,
+    global_rotation_ptr: *const f32,
+    global_translation_ptr: *const f32,
+) -> usize {
+    assert_eq!(rest_joints_len % 3, 0);
+    assert_eq!(rest_vertices_len % 3, 0);
+    assert_eq!(joint_transforms_len % 16, 0);
+    assert_eq!(pose_offsets_len, rest_vertices_len);
+    assert_eq!(
+        lbs_weights_len,
+        (rest_vertices_len / 3) * (rest_joints_len / 3)
     );
-    Ok(())
+
+    SMPL_MODELS.with_borrow_mut(|models| {
+        let id = models.len();
+        models.push(SmplRuntimeModel {
+            model: smpl::Model {
+                lbs_weights: unsafe { read_slice(lbs_weights_ptr, lbs_weights_len) },
+            },
+            identity: smpl::Identity {
+                rest_joints: unsafe { read_vec3s(rest_joints_ptr, rest_joints_len) },
+                rest_vertices: unsafe { read_vec3s(rest_vertices_ptr, rest_vertices_len) },
+            },
+            pose: smpl::Pose {
+                joint_transforms: unsafe { read_mat4s(joint_transforms_ptr, joint_transforms_len) },
+                pose_offsets: unsafe { read_vec3s(pose_offsets_ptr, pose_offsets_len) },
+                global_rotation: unsafe { read_vec3(global_rotation_ptr) },
+                global_translation: unsafe { read_vec3(global_translation_ptr) },
+            },
+        });
+        id
+    })
 }
 
-pub fn run_fixture(model_data_dir: &Path, fixture_path: &Path) -> Result<ModelOutput> {
-    let Fixture {
-        model,
-        case,
-        params,
-    } = load_json(fixture_path)?;
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// All pointers must refer to valid contiguous buffers for the given lengths.
+pub unsafe extern "C" fn smpl_set_identity(
+    id: usize,
+    rest_joints_ptr: *const f32,
+    rest_joints_len: usize,
+    rest_vertices_ptr: *const f32,
+    rest_vertices_len: usize,
+) {
+    assert_eq!(rest_joints_len % 3, 0);
+    assert_eq!(rest_vertices_len % 3, 0);
+    SMPL_MODELS.with_borrow_mut(|models| {
+        let runtime = models.get_mut(id).expect("invalid SMPL model id");
+        runtime.identity = smpl::Identity {
+            rest_joints: unsafe { read_vec3s(rest_joints_ptr, rest_joints_len) },
+            rest_vertices: unsafe { read_vec3s(rest_vertices_ptr, rest_vertices_len) },
+        };
+    });
+}
 
-    let (skeleton, mesh) = match model.as_str() {
-        "smpl" => {
-            let params = serde_json::from_value(params).context("parsing SMPL fixture params")?;
-            let model_data = load_json(&model_data_dir.join("smpl.json"))?;
-            smpl_forward(&model_data, &params)?
-        }
-        "mhr" => {
-            let params = serde_json::from_value(params).context("parsing MHR fixture params")?;
-            let model_data = load_json(&model_data_dir.join("mhr.json"))?;
-            mhr_forward(&model_data, &params)?
-        }
-        "smplh" => {
-            let params = serde_json::from_value(params).context("parsing SMPLH fixture params")?;
-            let model_data = load_json(&model_data_dir.join("smplh.json"))?;
-            smplh_forward(&model_data, &params)?
-        }
-        "smplx" => {
-            let params = serde_json::from_value(params).context("parsing SMPLX fixture params")?;
-            let model_data = load_json(&model_data_dir.join("smplx.json"))?;
-            smplx_forward(&model_data, &params)?
-        }
-        "anny" => {
-            let params = serde_json::from_value(params).context("parsing ANNY fixture params")?;
-            let model_data = load_json(&model_data_dir.join("anny.json"))?;
-            anny_forward(&model_data, &params)?
-        }
-        "soma" => {
-            let params = serde_json::from_value(params).context("parsing SOMA fixture params")?;
-            let model_data = load_json(&model_data_dir.join("soma.json"))?;
-            soma_forward(&model_data, &params)?
-        }
-        model => bail!("unsupported fixture model {model:?}"),
-    };
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// All pointers must refer to valid contiguous buffers for the given lengths.
+pub unsafe extern "C" fn smpl_set_pose(
+    id: usize,
+    joint_transforms_ptr: *const f32,
+    joint_transforms_len: usize,
+    pose_offsets_ptr: *const f32,
+    pose_offsets_len: usize,
+) {
+    assert_eq!(joint_transforms_len % 16, 0);
+    assert_eq!(pose_offsets_len % 3, 0);
+    SMPL_MODELS.with_borrow_mut(|models| {
+        let runtime = models.get_mut(id).expect("invalid SMPL model id");
+        runtime.pose.joint_transforms =
+            unsafe { read_mat4s(joint_transforms_ptr, joint_transforms_len) };
+        runtime.pose.pose_offsets = unsafe { read_vec3s(pose_offsets_ptr, pose_offsets_len) };
+    });
+}
 
-    Ok(ModelOutput {
-        model,
-        case,
-        skeleton,
-        mesh,
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// Pointers must refer to three contiguous `f32` values.
+pub unsafe extern "C" fn smpl_set_global(
+    id: usize,
+    global_rotation_ptr: *const f32,
+    global_translation_ptr: *const f32,
+) {
+    SMPL_MODELS.with_borrow_mut(|models| {
+        let runtime = models.get_mut(id).expect("invalid SMPL model id");
+        runtime.pose.global_rotation = unsafe { read_vec3(global_rotation_ptr) };
+        runtime.pose.global_translation = unsafe { read_vec3(global_translation_ptr) };
+    });
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn smpl_forward(id: usize) -> u64 {
+    SMPL_MODELS.with_borrow(|models| {
+        let runtime = models.get(id).expect("invalid SMPL model id");
+        write_vec3s(&smpl::forward_vertices(
+            &runtime.model,
+            &runtime.identity,
+            &runtime.pose,
+        ))
     })
+}
+
+unsafe fn read_slice<T: Copy>(ptr: *const T, len: usize) -> Vec<T> {
+    unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
+}
+
+unsafe fn read_vec3(ptr: *const f32) -> Vec3 {
+    let values = unsafe { std::slice::from_raw_parts(ptr, 3) };
+    Vec3::new(values[0], values[1], values[2])
+}
+
+unsafe fn read_vec3s(ptr: *const f32, len: usize) -> Vec<Vec3> {
+    unsafe { std::slice::from_raw_parts(ptr, len) }
+        .chunks_exact(3)
+        .map(|xyz| Vec3::new(xyz[0], xyz[1], xyz[2]))
+        .collect()
+}
+
+unsafe fn read_mat4s(ptr: *const f32, len: usize) -> Vec<Mat4> {
+    unsafe { std::slice::from_raw_parts(ptr, len) }
+        .chunks_exact(16)
+        .map(|rows| {
+            Mat4::from_cols_array(&[
+                rows[0], rows[4], rows[8], rows[12], rows[1], rows[5], rows[9], rows[13], rows[2],
+                rows[6], rows[10], rows[14], rows[3], rows[7], rows[11], rows[15],
+            ])
+        })
+        .collect()
+}
+
+fn write_vec3s(vertices: &[Vec3]) -> u64 {
+    let bytes = vertices
+        .iter()
+        .flat_map(|vertex| [vertex.x, vertex.y, vertex.z])
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
+    let len = bytes.len();
+    let ptr = Box::into_raw(bytes) as *mut f32 as *mut u8;
+    pack(ptr, len)
+}
+
+fn pack(ptr: *mut u8, len: usize) -> u64 {
+    ((ptr as u64) << 32) | len as u64
+}
+
+fn unpack(handle: u64) -> (*mut u8, usize) {
+    ((handle >> 32) as *mut u8, (handle & 0xffff_ffff) as usize)
 }
