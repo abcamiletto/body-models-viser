@@ -58,3 +58,28 @@ fn mat4_from_rows(rows: &[f32]) -> Mat4 {
         rows[10], rows[14], rows[3], rows[7], rows[11], rows[15],
     ])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forward_vertices_applies_pose_and_global_transform() {
+        let inputs = ForwardInputs {
+            lbs_weights: &[1.0],
+            rest_joints: &[0.0, 0.0, 0.0],
+            rest_vertices: &[1.0, 2.0, 3.0],
+            joint_transforms: &[
+                1.0, 0.0, 0.0, 4.0, 0.0, 1.0, 0.0, 5.0, 0.0, 0.0, 1.0, 6.0, 0.0, 0.0, 0.0, 1.0,
+            ],
+            pose_offsets: &[0.5, 1.0, 1.5],
+            global_rotation: &[0.0, 0.0, 0.0],
+            global_translation: &[10.0, 20.0, 30.0],
+        };
+        let mut output = [0.0; 3];
+
+        forward_vertices(inputs, &mut output);
+
+        assert_eq!(output, [15.5, 28.0, 40.5]);
+    }
+}

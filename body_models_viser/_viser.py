@@ -53,7 +53,8 @@ class BodyModelsViserReadyMessage(_messages.Message, include_in_scene_serializat
 class _RuntimeState:
     ready_clients: set[int] = dataclasses.field(default_factory=set)
     installed_clients: set[int] = dataclasses.field(default_factory=set)
-    messages: list[_messages.Message] = dataclasses.field(default_factory=list)
+    models: dict[str, BodyModelsViserSmplMessage] = dataclasses.field(default_factory=dict)
+    poses: dict[str, BodyModelsViserPoseMessage] = dataclasses.field(default_factory=dict)
 
 
 class SmplBodyHandle:
@@ -116,10 +117,15 @@ class SmplBodyHandle:
             self.pose[key] = np.asarray(value, dtype=np.float32).copy()
         identity = self.model.prepare_identity(self.pose["shape"]) if shape_changed else None
         prepared_pose = _prepare_pose(self.model, self.pose, identity) if pose_changed else None
-        _queue_ready_clients(self.scene, _pose_message(self.name, self.pose, identity, prepared_pose))
+        message = _pose_message(self.name, self.pose, identity, prepared_pose)
+        _runtime_state(self.scene).poses[self.name] = message
+        _queue_ready_clients(self.scene, message)
 
     def remove(self) -> None:
-        self.scene._websock_interface.queue_message(_messages.RemoveSceneNodeMessage(self.name))
+        state = _runtime_state(self.scene)
+        state.models.pop(self.name, None)
+        state.poses.pop(self.name, None)
+        _queue_ready_clients(self.scene, _messages.RemoveSceneNodeMessage(self.name))
 
 
 def add_body_model(
@@ -171,7 +177,8 @@ def add_body_model(
         props=props,
     )
     state = _runtime_state(scene)
-    state.messages.append(message)
+    state.models[name] = message
+    state.poses.pop(name, None)
     _install_connected_clients(scene, state)
     _queue_ready_clients(scene, message)
 
@@ -194,8 +201,7 @@ def _runtime_state(scene: Any) -> _RuntimeState:
     def ready(client_id: int, _: BodyModelsViserReadyMessage) -> None:
         state.ready_clients.add(client_id)
         client_state = websock._client_state_from_id[client_id]
-        for message in state.messages:
-            client_state.message_buffer.push(message)
+        _replay_state(client_state, state)
 
     websock.register_handler(BodyModelsViserReadyMessage, ready)
     return state
@@ -223,6 +229,13 @@ def _queue_ready_clients(scene: Any, message: _messages.Message) -> None:
         client_state = scene._websock_interface._client_state_from_id.get(client_id)
         if client_state is not None:
             client_state.message_buffer.push(message)
+
+
+def _replay_state(client_state: Any, state: _RuntimeState) -> None:
+    for name, message in state.models.items():
+        client_state.message_buffer.push(message)
+        if name in state.poses:
+            client_state.message_buffer.push(state.poses[name])
 
 
 def _install_javascript() -> str:

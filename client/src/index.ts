@@ -49,7 +49,8 @@ type MeshMessage = {
   };
 };
 
-type Message = AddSmplMessage | PoseMessage | MeshMessage | { type: string };
+type RemoveSceneNodeMessage = { type: "RemoveSceneNodeMessage"; name: string };
+type Message = AddSmplMessage | PoseMessage | MeshMessage | RemoveSceneNodeMessage | { type: string };
 
 type ViewerLike = {
   mutable: {
@@ -97,16 +98,11 @@ type MeshState = {
 };
 
 class BodyModelsViserRuntime {
-  version = "";
-  buildId = "";
-
   private wasm: WasmExports | null = null;
   private viewer: ViewerLike | null = null;
   private meshes = new Map<string, MeshState>();
 
-  install(wasmBase64: string, version: string, buildId: string): void {
-    this.version = version;
-    this.buildId = buildId;
+  install(wasmBase64: string): void {
     const bytes = Uint8Array.from(atob(wasmBase64), (char) => char.charCodeAt(0));
     const module = new WebAssembly.Module(bytes.buffer as ArrayBuffer);
     const instance = new WebAssembly.Instance(module);
@@ -128,10 +124,17 @@ class BodyModelsViserRuntime {
       this.setPose(message as PoseMessage);
       return true;
     }
+    if (message.type === "RemoveSceneNodeMessage") {
+      this.remove(message as RemoveSceneNodeMessage);
+    }
     return false;
   }
 
   private addSmpl(message: AddSmplMessage): void {
+    const existing = this.meshes.get(message.name);
+    if (existing !== undefined) {
+      this.freeMesh(existing);
+    }
     this.meshes.set(message.name, {
       vertexCount: message.vertex_count,
       lbsWeights: this.copyToWasm(message.lbs_weights),
@@ -146,6 +149,14 @@ class BodyModelsViserRuntime {
       props: message.props,
     });
     this.pushMesh(message.name);
+  }
+
+  private remove(message: RemoveSceneNodeMessage): void {
+    const mesh = this.meshes.get(message.name);
+    if (mesh !== undefined) {
+      this.freeMesh(mesh);
+      this.meshes.delete(message.name);
+    }
   }
 
   private setPose(message: PoseMessage): void {
@@ -219,6 +230,21 @@ class BodyModelsViserRuntime {
     return new Float32Array(new Float32Array(wasm.memory.buffer, buffer.ptr, buffer.len));
   }
 
+  private freeMesh(mesh: MeshState): void {
+    this.freeBuffer(mesh.lbsWeights);
+    this.freeBuffer(mesh.restJoints);
+    this.freeBuffer(mesh.restVertices);
+    this.freeBuffer(mesh.jointTransforms);
+    this.freeBuffer(mesh.poseOffsets);
+    this.freeBuffer(mesh.globalRotation);
+    this.freeBuffer(mesh.globalTranslation);
+    this.freeBuffer(mesh.outputVertices);
+  }
+
+  private freeBuffer(buffer: WasmBuffer): void {
+    this.requireWasm().wasm_free(buffer.ptr, buffer.byteLen);
+  }
+
   private requireWasm(): WasmExports {
     if (this.wasm === null) {
       throw new Error("body-models-viser WASM is not installed.");
@@ -285,7 +311,7 @@ const runtime = new BodyModelsViserRuntime();
 export function install(wasmBase64: string, runtimeVersion: string, runtimeBuildId: string): void {
   version = runtimeVersion;
   buildId = runtimeBuildId;
-  runtime.install(wasmBase64, runtimeVersion, runtimeBuildId);
+  runtime.install(wasmBase64);
 }
 
 export function ready(): void {
