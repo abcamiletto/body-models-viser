@@ -1,4 +1,5 @@
-import ndarray from "ndarray";
+export let version = "";
+export let buildId = "";
 
 type MeshProps = {
   color: [number, number, number];
@@ -54,6 +55,7 @@ type ViewerLike = {
   mutable: {
     current: {
       messageQueue: Message[];
+      sendMessage(message: { type: "BodyModelsViserReadyMessage" }): void;
     };
   };
 };
@@ -62,8 +64,7 @@ type WasmExports = {
   memory: WebAssembly.Memory;
   alloc(size: number): number;
   wasm_free(ptr: number, len: number): void;
-  output_free(handle: bigint): void;
-  smpl_create(
+  smpl_forward_vertices(
     lbsWeightsPtr: number,
     lbsWeightsLen: number,
     restJointsPtr: number,
@@ -76,39 +77,46 @@ type WasmExports = {
     poseOffsetsLen: number,
     globalRotationPtr: number,
     globalTranslationPtr: number,
-  ): number;
-  smpl_set_identity(
-    model: number,
-    restJointsPtr: number,
-    restJointsLen: number,
-    restVerticesPtr: number,
-    restVerticesLen: number,
+    outputVerticesPtr: number,
   ): void;
-  smpl_set_pose(
-    model: number,
-    jointTransformsPtr: number,
-    jointTransformsLen: number,
-    poseOffsetsPtr: number,
-    poseOffsetsLen: number,
-  ): void;
-  smpl_set_global(model: number, globalRotationPtr: number, globalTranslationPtr: number): void;
-  smpl_forward(model: number): bigint;
 };
 
-type WasmInput = { ptr: number; byteLen: number; len: number };
-type MeshState = { model: number; vertexCount: number; faces: Uint32Array; props: MeshProps };
+type WasmBuffer = { ptr: number; len: number; byteLen: number };
+type MeshState = {
+  vertexCount: number;
+  lbsWeights: WasmBuffer;
+  restJoints: WasmBuffer;
+  restVertices: WasmBuffer;
+  jointTransforms: WasmBuffer;
+  poseOffsets: WasmBuffer;
+  globalRotation: WasmBuffer;
+  globalTranslation: WasmBuffer;
+  outputVertices: WasmBuffer;
+  faces: Uint32Array;
+  props: MeshProps;
+};
 
 class BodyModelsViserRuntime {
+  version = "";
+  buildId = "";
+
   private wasm: WasmExports | null = null;
   private viewer: ViewerLike | null = null;
   private meshes = new Map<string, MeshState>();
 
-  install(wasmBase64: string): void {
+  install(wasmBase64: string, version: string, buildId: string): void {
+    this.version = version;
+    this.buildId = buildId;
     const bytes = Uint8Array.from(atob(wasmBase64), (char) => char.charCodeAt(0));
     const module = new WebAssembly.Module(bytes.buffer as ArrayBuffer);
     const instance = new WebAssembly.Instance(module);
     this.wasm = instance.exports as WasmExports;
     this.patchMessageQueue();
+    this.ready();
+  }
+
+  ready(): void {
+    this.getViewer().mutable.current.sendMessage({ type: "BodyModelsViserReadyMessage" });
   }
 
   consume(message: Message): boolean {
@@ -124,35 +132,17 @@ class BodyModelsViserRuntime {
   }
 
   private addSmpl(message: AddSmplMessage): void {
-    const wasm = this.requireWasm();
-    const lbsWeights = this.writeArray(float32(message.lbs_weights, [message.vertex_count, 24]));
-    const restJoints = this.writeArray(float32(message.rest_joints, [24, 3]));
-    const restVertices = this.writeArray(float32(message.rest_vertices, [message.vertex_count, 3]));
-    const jointTransforms = this.writeArray(float32(message.joint_transforms, [24, 4, 4]));
-    const poseOffsets = this.writeArray(float32(message.pose_offsets, [message.vertex_count, 3]));
-    const globalRotation = this.writeArray(float32(message.global_rotation, [3]));
-    const globalTranslation = this.writeArray(float32(message.global_translation, [3]));
-    const model = wasm.smpl_create(
-      lbsWeights.ptr,
-      lbsWeights.len,
-      restJoints.ptr,
-      restJoints.len,
-      restVertices.ptr,
-      restVertices.len,
-      jointTransforms.ptr,
-      jointTransforms.len,
-      poseOffsets.ptr,
-      poseOffsets.len,
-      globalRotation.ptr,
-      globalTranslation.ptr,
-    );
-    [lbsWeights, restJoints, restVertices, jointTransforms, poseOffsets, globalRotation, globalTranslation].forEach(
-      (input) => this.free(input),
-    );
     this.meshes.set(message.name, {
-      model,
       vertexCount: message.vertex_count,
-      faces: uint32(message.faces, [message.face_count, 3]).data,
+      lbsWeights: this.copyToWasm(message.lbs_weights),
+      restJoints: this.copyToWasm(message.rest_joints),
+      restVertices: this.copyToWasm(message.rest_vertices),
+      jointTransforms: this.copyToWasm(message.joint_transforms),
+      poseOffsets: this.copyToWasm(message.pose_offsets),
+      globalRotation: this.copyToWasm(message.global_rotation),
+      globalTranslation: this.copyToWasm(message.global_translation),
+      outputVertices: this.allocF32(message.vertex_count * 3),
+      faces: message.faces,
       props: message.props,
     });
     this.pushMesh(message.name);
@@ -163,26 +153,16 @@ class BodyModelsViserRuntime {
     if (mesh === undefined) {
       throw new Error(`SMPL ${message.name} has not been created.`);
     }
-    const wasm = this.requireWasm();
     if (message.rest_joints !== null && message.rest_vertices !== null) {
-      const restJoints = this.writeArray(float32(message.rest_joints, [24, 3]));
-      const restVertices = this.writeArray(float32(message.rest_vertices, [mesh.vertexCount, 3]));
-      wasm.smpl_set_identity(mesh.model, restJoints.ptr, restJoints.len, restVertices.ptr, restVertices.len);
-      this.free(restJoints);
-      this.free(restVertices);
+      this.copyIntoWasm(mesh.restJoints, message.rest_joints);
+      this.copyIntoWasm(mesh.restVertices, message.rest_vertices);
     }
     if (message.joint_transforms !== null && message.pose_offsets !== null) {
-      const jointTransforms = this.writeArray(float32(message.joint_transforms, [24, 4, 4]));
-      const poseOffsets = this.writeArray(float32(message.pose_offsets, [message.pose_offsets.length / 3, 3]));
-      wasm.smpl_set_pose(mesh.model, jointTransforms.ptr, jointTransforms.len, poseOffsets.ptr, poseOffsets.len);
-      this.free(jointTransforms);
-      this.free(poseOffsets);
+      this.copyIntoWasm(mesh.jointTransforms, message.joint_transforms);
+      this.copyIntoWasm(mesh.poseOffsets, message.pose_offsets);
     }
-    const globalRotation = this.writeArray(float32(message.global_rotation, [3]));
-    const globalTranslation = this.writeArray(float32(message.global_translation, [3]));
-    wasm.smpl_set_global(mesh.model, globalRotation.ptr, globalTranslation.ptr);
-    this.free(globalRotation);
-    this.free(globalTranslation);
+    this.copyIntoWasm(mesh.globalRotation, message.global_rotation);
+    this.copyIntoWasm(mesh.globalTranslation, message.global_translation);
     this.pushMesh(message.name);
   }
 
@@ -192,9 +172,22 @@ class BodyModelsViserRuntime {
       throw new Error(`SMPL ${name} has not been created.`);
     }
     const wasm = this.requireWasm();
-    const output = wasm.smpl_forward(mesh.model);
-    const vertices = this.readFloat32Output(output);
-    wasm.output_free(output);
+    wasm.smpl_forward_vertices(
+      mesh.lbsWeights.ptr,
+      mesh.lbsWeights.len,
+      mesh.restJoints.ptr,
+      mesh.restJoints.len,
+      mesh.restVertices.ptr,
+      mesh.restVertices.len,
+      mesh.jointTransforms.ptr,
+      mesh.jointTransforms.len,
+      mesh.poseOffsets.ptr,
+      mesh.poseOffsets.len,
+      mesh.globalRotation.ptr,
+      mesh.globalTranslation.ptr,
+      mesh.outputVertices.ptr,
+    );
+    const vertices = this.copyOutput(mesh.outputVertices);
     this.getViewer().mutable.current.messageQueue.push({
       type: "MeshMessage",
       name,
@@ -202,23 +195,28 @@ class BodyModelsViserRuntime {
     });
   }
 
-  private writeArray(array: ndarray.NdArray<Float32Array | Uint32Array>): WasmInput {
-    const wasm = this.requireWasm();
-    const bytes = new Uint8Array(array.data.buffer, array.data.byteOffset, array.data.byteLength);
-    const ptr = wasm.alloc(bytes.byteLength);
-    new Uint8Array(wasm.memory.buffer, ptr, bytes.byteLength).set(bytes);
-    return { ptr, byteLen: bytes.byteLength, len: array.data.length };
+  private copyToWasm(array: Float32Array): WasmBuffer {
+    const buffer = this.allocF32(array.length);
+    this.copyIntoWasm(buffer, array);
+    return buffer;
   }
 
-  private readFloat32Output(handle: bigint): Float32Array {
+  private allocF32(len: number): WasmBuffer {
     const wasm = this.requireWasm();
-    const ptr = Number(handle >> 32n);
-    const len = Number(handle & 0xffffffffn);
-    return new Float32Array(new Float32Array(wasm.memory.buffer, ptr, len));
+    return { ptr: wasm.alloc(len * 4), len, byteLen: len * 4 };
   }
 
-  private free(input: WasmInput): void {
-    this.requireWasm().wasm_free(input.ptr, input.byteLen);
+  private copyIntoWasm(buffer: WasmBuffer, array: Float32Array): void {
+    if (array.length !== buffer.len) {
+      throw new Error(`Expected ${buffer.len} f32 values, received ${array.length}.`);
+    }
+    const wasm = this.requireWasm();
+    new Float32Array(wasm.memory.buffer, buffer.ptr, buffer.len).set(array);
+  }
+
+  private copyOutput(buffer: WasmBuffer): Float32Array {
+    const wasm = this.requireWasm();
+    return new Float32Array(new Float32Array(wasm.memory.buffer, buffer.ptr, buffer.len));
   }
 
   private requireWasm(): WasmExports {
@@ -239,14 +237,6 @@ class BodyModelsViserRuntime {
     const push = queue.push.bind(queue);
     queue.push = (...messages: Message[]) => push(...messages.filter((message) => !this.consume(message)));
   }
-}
-
-function float32(data: Float32Array, shape: number[]): ndarray.NdArray<Float32Array> {
-  return ndarray(data, shape);
-}
-
-function uint32(data: Uint32Array, shape: number[]): ndarray.NdArray<Uint32Array> {
-  return ndarray(data, shape);
 }
 
 type ReactFiberNode = {
@@ -292,6 +282,12 @@ function isViewerLike(value: unknown): value is ViewerLike {
 
 const runtime = new BodyModelsViserRuntime();
 
-export function install(wasmBase64: string): void {
-  runtime.install(wasmBase64);
+export function install(wasmBase64: string, runtimeVersion: string, runtimeBuildId: string): void {
+  version = runtimeVersion;
+  buildId = runtimeBuildId;
+  runtime.install(wasmBase64, runtimeVersion, runtimeBuildId);
+}
+
+export function ready(): void {
+  runtime.ready();
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import dataclasses
+import hashlib
 from importlib.resources import files
 from typing import Any
 
@@ -12,6 +13,8 @@ from jaxtyping import Float
 from viser import _messages
 
 from ._client_autobuild import ensure_client_is_built
+
+RUNTIME_VERSION = "0.0.2"
 
 
 @dataclasses.dataclass
@@ -39,6 +42,18 @@ class BodyModelsViserPoseMessage(_messages.Message, include_in_scene_serializati
     pose_offsets: npt.NDArray[np.float32] | None
     global_rotation: npt.NDArray[np.float32]
     global_translation: npt.NDArray[np.float32]
+
+
+@dataclasses.dataclass
+class BodyModelsViserReadyMessage(_messages.Message, include_in_scene_serialization=False):
+    pass
+
+
+@dataclasses.dataclass
+class _RuntimeState:
+    ready_clients: set[int] = dataclasses.field(default_factory=set)
+    installed_clients: set[int] = dataclasses.field(default_factory=set)
+    messages: list[_messages.Message] = dataclasses.field(default_factory=list)
 
 
 class SmplBodyHandle:
@@ -101,7 +116,7 @@ class SmplBodyHandle:
             self.pose[key] = np.asarray(value, dtype=np.float32).copy()
         identity = self.model.prepare_identity(self.pose["shape"]) if shape_changed else None
         prepared_pose = _prepare_pose(self.model, self.pose, identity) if pose_changed else None
-        _queue_connected_clients(self.scene, _pose_message(self.name, self.pose, identity, prepared_pose))
+        _queue_ready_clients(self.scene, _pose_message(self.name, self.pose, identity, prepared_pose))
 
     def remove(self) -> None:
         self.scene._websock_interface.queue_message(_messages.RemoveSceneNodeMessage(self.name))
@@ -155,50 +170,83 @@ def add_body_model(
         global_translation=_array(pose["global_translation"], np.float32),
         props=props,
     )
-    _queue_connected_clients(scene, _messages.RunJavascriptMessage(_install_javascript()), flush=True)
-    _queue_connected_clients(scene, message, after_flush=True)
+    state = _runtime_state(scene)
+    state.messages.append(message)
+    _install_connected_clients(scene, state)
+    _queue_ready_clients(scene, message)
 
     @scene._websock_interface.on_client_connect
     def _(client: Any) -> None:
-        _install_client_runtime(client)
-        _queue_after_flush(client.get_message_buffer(), message)
+        _install_client_runtime(client, state)
 
     return SmplBodyHandle(scene, name, model, pose)
 
 
-def _install_client_runtime(client: Any) -> None:
+def _runtime_state(scene: Any) -> _RuntimeState:
+    websock = scene._websock_interface
+    state = getattr(websock, "_body_models_viser", None)
+    if state is not None:
+        return state
+
+    state = _RuntimeState()
+    setattr(websock, "_body_models_viser", state)
+
+    def ready(client_id: int, _: BodyModelsViserReadyMessage) -> None:
+        state.ready_clients.add(client_id)
+        client_state = websock._client_state_from_id[client_id]
+        for message in state.messages:
+            client_state.message_buffer.push(message)
+
+    websock.register_handler(BodyModelsViserReadyMessage, ready)
+    return state
+
+
+def _install_connected_clients(scene: Any, state: _RuntimeState) -> None:
+    for client_id, client_state in scene._websock_interface._client_state_from_id.items():
+        if client_id not in state.installed_clients:
+            state.installed_clients.add(client_id)
+            client_state.message_buffer.push(_messages.RunJavascriptMessage(_install_javascript()))
+            client_state.message_buffer.flush()
+
+
+def _install_client_runtime(client: Any, state: _RuntimeState) -> None:
+    if client.client_id in state.installed_clients:
+        return
+    state.installed_clients.add(client.client_id)
     client.queue_message(_messages.RunJavascriptMessage(_install_javascript()))
     client.get_message_buffer().flush()
 
 
-def _queue_connected_clients(
-    scene: Any,
-    message: _messages.Message,
-    *,
-    flush: bool = False,
-    after_flush: bool = False,
-) -> None:
-    for state in scene._websock_interface._client_state_from_id.values():
-        if after_flush:
-            _queue_after_flush(state.message_buffer, message)
-        else:
-            state.message_buffer.push(message)
-            if flush:
-                state.message_buffer.flush()
-
-
-def _queue_after_flush(buffer: Any, message: _messages.Message) -> None:
-    def queue_message() -> None:
-        buffer.event_loop.call_later(0.05, buffer.push, message)
-
-    buffer.event_loop.call_soon_threadsafe(queue_message)
+def _queue_ready_clients(scene: Any, message: _messages.Message) -> None:
+    state = _runtime_state(scene)
+    for client_id in state.ready_clients:
+        client_state = scene._websock_interface._client_state_from_id.get(client_id)
+        if client_state is not None:
+            client_state.message_buffer.push(message)
 
 
 def _install_javascript() -> str:
     ensure_client_is_built()
     source = (files(__package__) / "client" / "body-models-viser.js").read_text()
-    wasm = base64.b64encode(_wasm_bytes()).decode("ascii")
-    return f"if (!window.BodyModelsViser) {{\n{source}\nwindow.BodyModelsViser = BodyModelsViser;\nwindow.BodyModelsViser.install('{wasm}');\n}}"
+    wasm_bytes = _wasm_bytes()
+    wasm = base64.b64encode(wasm_bytes).decode("ascii")
+    build_id = hashlib.sha256(source.encode() + wasm_bytes).hexdigest()
+    return f"""
+(() => {{
+  const version = {RUNTIME_VERSION!r};
+  const buildId = {build_id!r};
+  if (window.BodyModelsViser !== undefined) {{
+    if (window.BodyModelsViser.version !== version || window.BodyModelsViser.buildId !== buildId) {{
+      throw new Error(`body-models-viser runtime mismatch: installed ${{window.BodyModelsViser.version}}/${{window.BodyModelsViser.buildId}}, requested ${{version}}/${{buildId}}`);
+    }}
+    window.BodyModelsViser.ready();
+    return;
+  }}
+  {source}
+  window.BodyModelsViser = BodyModelsViser;
+  window.BodyModelsViser.install({wasm!r}, version, buildId);
+}})();
+"""
 
 
 def _wasm_bytes() -> bytes:

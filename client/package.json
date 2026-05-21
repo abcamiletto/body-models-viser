@@ -10,11 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/ndarray": "^1.0.14",
     "esbuild": "^0.25.12",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "ndarray": "^1.0.19"
   }
 }
