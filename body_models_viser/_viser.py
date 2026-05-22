@@ -18,7 +18,8 @@ RUNTIME_VERSION = "0.0.2"
 
 
 @dataclasses.dataclass
-class BodyModelsViserSmplMessage(_messages.Message, include_in_scene_serialization=True):
+class BodyModelsViserModelMessage(_messages.Message, include_in_scene_serialization=True):
+    model_type: str
     name: str
     vertex_count: int
     face_count: int
@@ -53,7 +54,7 @@ class BodyModelsViserReadyMessage(_messages.Message, include_in_scene_serializat
 class _RuntimeState:
     ready_clients: set[int] = dataclasses.field(default_factory=set)
     installed_clients: set[int] = dataclasses.field(default_factory=set)
-    models: dict[str, BodyModelsViserSmplMessage] = dataclasses.field(default_factory=dict)
+    models: dict[str, BodyModelsViserModelMessage] = dataclasses.field(default_factory=dict)
     poses: dict[str, BodyModelsViserPoseMessage] = dataclasses.field(default_factory=dict)
 
 
@@ -162,7 +163,8 @@ def add_body_model(
         "cast_shadow": cast_shadow,
         "receive_shadow": receive_shadow,
     }
-    message = BodyModelsViserSmplMessage(
+    message = BodyModelsViserModelMessage(
+        model_type="smpl",
         name=name,
         vertex_count=int(model.weights.v_template.shape[0]),
         face_count=int(model.faces.shape[0]),

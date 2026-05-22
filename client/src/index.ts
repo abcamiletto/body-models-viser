@@ -13,8 +13,11 @@ type MeshProps = {
   receive_shadow: boolean | number;
 };
 
-type AddSmplMessage = {
-  type: "BodyModelsViserSmplMessage";
+type ModelType = "smpl";
+
+type ModelMessage = {
+  type: "BodyModelsViserModelMessage";
+  model_type: string;
   name: string;
   vertex_count: number;
   face_count: number;
@@ -50,7 +53,7 @@ type MeshMessage = {
 };
 
 type RemoveSceneNodeMessage = { type: "RemoveSceneNodeMessage"; name: string };
-type Message = AddSmplMessage | PoseMessage | MeshMessage | RemoveSceneNodeMessage | { type: string };
+type Message = ModelMessage | PoseMessage | MeshMessage | RemoveSceneNodeMessage | { type: string };
 
 type ViewerLike = {
   mutable: {
@@ -116,8 +119,8 @@ class BodyModelsViserRuntime {
   }
 
   consume(message: Message): boolean {
-    if (message.type === "BodyModelsViserSmplMessage") {
-      this.addSmpl(message as AddSmplMessage);
+    if (message.type === "BodyModelsViserModelMessage") {
+      this.addModel(message as ModelMessage);
       return true;
     }
     if (message.type === "BodyModelsViserPoseMessage") {
@@ -130,7 +133,10 @@ class BodyModelsViserRuntime {
     return false;
   }
 
-  private addSmpl(message: AddSmplMessage): void {
+  private addModel(message: ModelMessage): void {
+    if (message.model_type !== "smpl") {
+      throw new Error(`Unsupported body model type ${message.model_type}.`);
+    }
     const existing = this.meshes.get(message.name);
     if (existing !== undefined) {
       this.freeMesh(existing);
@@ -162,7 +168,7 @@ class BodyModelsViserRuntime {
   private setPose(message: PoseMessage): void {
     const mesh = this.meshes.get(message.name);
     if (mesh === undefined) {
-      throw new Error(`SMPL ${message.name} has not been created.`);
+      throw new Error(`Body model ${message.name} has not been created.`);
     }
     if (message.rest_joints !== null && message.rest_vertices !== null) {
       this.copyIntoWasm(mesh.restJoints, message.rest_joints);
@@ -180,7 +186,7 @@ class BodyModelsViserRuntime {
   private pushMesh(name: string): void {
     const mesh = this.meshes.get(name);
     if (mesh === undefined) {
-      throw new Error(`SMPL ${name} has not been created.`);
+      throw new Error(`Body model ${name} has not been created.`);
     }
     const wasm = this.requireWasm();
     wasm.smpl_forward_vertices(
