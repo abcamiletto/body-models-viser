@@ -10,27 +10,73 @@ pub struct ForwardInputs<'a> {
     pub global_translation: &'a [f32],
 }
 
+pub struct SkinInputs<'a> {
+    pub lbs_weights: &'a [f32],
+    pub rest_vertices: &'a [f32],
+    pub bone_transforms: &'a [f32],
+    pub pose_offsets: &'a [f32],
+    pub global_rotation: &'a [f32],
+    pub global_translation: &'a [f32],
+}
+
 pub fn forward_vertices(inputs: ForwardInputs<'_>, output_vertices: &mut [f32]) {
     let joint_count = inputs.rest_joints.len() / 3;
-    let vertex_count = inputs.rest_vertices.len() / 3;
     let joint_transforms = (0..joint_count)
         .map(|joint| transform_for_joint(&inputs, joint))
         .collect::<Vec<_>>();
-    let global_rotation = vec3(inputs.global_rotation, 0);
+    skin_with_transforms(
+        inputs.lbs_weights,
+        inputs.rest_vertices,
+        &joint_transforms,
+        inputs.pose_offsets,
+        inputs.global_rotation,
+        inputs.global_translation,
+        output_vertices,
+    );
+}
+
+pub fn skin_vertices(inputs: SkinInputs<'_>, output_vertices: &mut [f32]) {
+    let bone_count = inputs.bone_transforms.len() / 16;
+    let bone_transforms = (0..bone_count)
+        .map(|bone| mat4_from_rows(&inputs.bone_transforms[16 * bone..16 * bone + 16]))
+        .collect::<Vec<_>>();
+    skin_with_transforms(
+        inputs.lbs_weights,
+        inputs.rest_vertices,
+        &bone_transforms,
+        inputs.pose_offsets,
+        inputs.global_rotation,
+        inputs.global_translation,
+        output_vertices,
+    );
+}
+
+fn skin_with_transforms(
+    lbs_weights: &[f32],
+    rest_vertices: &[f32],
+    bone_transforms: &[Mat4],
+    pose_offsets: &[f32],
+    global_rotation: &[f32],
+    global_translation: &[f32],
+    output_vertices: &mut [f32],
+) {
+    let bone_count = bone_transforms.len();
+    let vertex_count = rest_vertices.len() / 3;
+    let global_rotation = vec3(global_rotation, 0);
     let global = Mat4::from_rotation_translation(
         glam::Quat::from_axis_angle(
             global_rotation.normalize_or_zero(),
             global_rotation.length(),
         ),
-        vec3(inputs.global_translation, 0),
+        vec3(global_translation, 0),
     );
 
     for vertex in 0..vertex_count {
-        let point = vec3(inputs.rest_vertices, vertex) + vec3(inputs.pose_offsets, vertex);
-        let weights = &inputs.lbs_weights[vertex * joint_count..(vertex + 1) * joint_count];
+        let point = vec3(rest_vertices, vertex) + vec3(pose_offsets, vertex);
+        let weights = &lbs_weights[vertex * bone_count..(vertex + 1) * bone_count];
         let mut transform = Mat4::ZERO;
         for (joint, &weight) in weights.iter().enumerate() {
-            transform += joint_transforms[joint] * weight;
+            transform += bone_transforms[joint] * weight;
         }
         let output = global.transform_point3(transform.transform_point3(point));
         output_vertices[3 * vertex] = output.x;

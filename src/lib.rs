@@ -62,3 +62,46 @@ pub unsafe extern "C" fn smpl_forward_vertices(
         unsafe { std::slice::from_raw_parts_mut(output_vertices_ptr, vertex_count * 3) },
     );
 }
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// All pointers must refer to valid contiguous buffers for the given lengths.
+pub unsafe extern "C" fn skin_forward_vertices(
+    lbs_weights_ptr: *const f32,
+    lbs_weights_len: usize,
+    rest_vertices_ptr: *const f32,
+    rest_vertices_len: usize,
+    bone_transforms_ptr: *const f32,
+    bone_transforms_len: usize,
+    pose_offsets_ptr: *const f32,
+    pose_offsets_len: usize,
+    global_rotation_ptr: *const f32,
+    global_translation_ptr: *const f32,
+    output_vertices_ptr: *mut f32,
+) {
+    assert_eq!(rest_vertices_len % 3, 0);
+    assert_eq!(bone_transforms_len % 16, 0);
+    assert_eq!(pose_offsets_len, rest_vertices_len);
+    assert_eq!(
+        lbs_weights_len,
+        (rest_vertices_len / 3) * (bone_transforms_len / 16)
+    );
+
+    let vertex_count = rest_vertices_len / 3;
+    smpl::skin_vertices(
+        smpl::SkinInputs {
+            lbs_weights: unsafe { std::slice::from_raw_parts(lbs_weights_ptr, lbs_weights_len) },
+            rest_vertices: unsafe {
+                std::slice::from_raw_parts(rest_vertices_ptr, rest_vertices_len)
+            },
+            bone_transforms: unsafe {
+                std::slice::from_raw_parts(bone_transforms_ptr, bone_transforms_len)
+            },
+            pose_offsets: unsafe { std::slice::from_raw_parts(pose_offsets_ptr, pose_offsets_len) },
+            global_rotation: unsafe { std::slice::from_raw_parts(global_rotation_ptr, 3) },
+            global_translation: unsafe { std::slice::from_raw_parts(global_translation_ptr, 3) },
+        },
+        unsafe { std::slice::from_raw_parts_mut(output_vertices_ptr, vertex_count * 3) },
+    );
+}

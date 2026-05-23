@@ -13,14 +13,13 @@ type MeshProps = {
   receive_shadow: boolean | number;
 };
 
-type ModelType = "smpl";
+type ModelType = "smpl" | "skin";
 
 type ModelMessage = {
   type: "BodyModelsViserModelMessage";
-  model_type: string;
+  model_type: ModelType;
   name: string;
   vertex_count: number;
-  face_count: number;
   lbs_weights: Float32Array;
   faces: Uint32Array;
   rest_joints: Float32Array;
@@ -83,11 +82,24 @@ type WasmExports = {
     globalTranslationPtr: number,
     outputVerticesPtr: number,
   ): void;
+  skin_forward_vertices(
+    lbsWeightsPtr: number,
+    lbsWeightsLen: number,
+    restVerticesPtr: number,
+    restVerticesLen: number,
+    boneTransformsPtr: number,
+    boneTransformsLen: number,
+    poseOffsetsPtr: number,
+    poseOffsetsLen: number,
+    globalRotationPtr: number,
+    globalTranslationPtr: number,
+    outputVerticesPtr: number,
+  ): void;
 };
 
 type WasmBuffer = { ptr: number; len: number; byteLen: number };
 type MeshState = {
-  vertexCount: number;
+  modelType: ModelType;
   lbsWeights: WasmBuffer;
   restJoints: WasmBuffer;
   restVertices: WasmBuffer;
@@ -134,7 +146,7 @@ class BodyModelsViserRuntime {
   }
 
   private addModel(message: ModelMessage): void {
-    if (message.model_type !== "smpl") {
+    if (message.model_type !== "smpl" && message.model_type !== "skin") {
       throw new Error(`Unsupported body model type ${message.model_type}.`);
     }
     const existing = this.meshes.get(message.name);
@@ -142,7 +154,7 @@ class BodyModelsViserRuntime {
       this.freeMesh(existing);
     }
     this.meshes.set(message.name, {
-      vertexCount: message.vertex_count,
+      modelType: message.model_type,
       lbsWeights: this.copyToWasm(message.lbs_weights),
       restJoints: this.copyToWasm(message.rest_joints),
       restVertices: this.copyToWasm(message.rest_vertices),
@@ -189,21 +201,37 @@ class BodyModelsViserRuntime {
       throw new Error(`Body model ${name} has not been created.`);
     }
     const wasm = this.requireWasm();
-    wasm.smpl_forward_vertices(
-      mesh.lbsWeights.ptr,
-      mesh.lbsWeights.len,
-      mesh.restJoints.ptr,
-      mesh.restJoints.len,
-      mesh.restVertices.ptr,
-      mesh.restVertices.len,
-      mesh.jointTransforms.ptr,
-      mesh.jointTransforms.len,
-      mesh.poseOffsets.ptr,
-      mesh.poseOffsets.len,
-      mesh.globalRotation.ptr,
-      mesh.globalTranslation.ptr,
-      mesh.outputVertices.ptr,
-    );
+    if (mesh.modelType === "smpl") {
+      wasm.smpl_forward_vertices(
+        mesh.lbsWeights.ptr,
+        mesh.lbsWeights.len,
+        mesh.restJoints.ptr,
+        mesh.restJoints.len,
+        mesh.restVertices.ptr,
+        mesh.restVertices.len,
+        mesh.jointTransforms.ptr,
+        mesh.jointTransforms.len,
+        mesh.poseOffsets.ptr,
+        mesh.poseOffsets.len,
+        mesh.globalRotation.ptr,
+        mesh.globalTranslation.ptr,
+        mesh.outputVertices.ptr,
+      );
+    } else {
+      wasm.skin_forward_vertices(
+        mesh.lbsWeights.ptr,
+        mesh.lbsWeights.len,
+        mesh.restVertices.ptr,
+        mesh.restVertices.len,
+        mesh.jointTransforms.ptr,
+        mesh.jointTransforms.len,
+        mesh.poseOffsets.ptr,
+        mesh.poseOffsets.len,
+        mesh.globalRotation.ptr,
+        mesh.globalTranslation.ptr,
+        mesh.outputVertices.ptr,
+      );
+    }
     const vertices = this.copyOutput(mesh.outputVertices);
     this.getViewer().mutable.current.messageQueue.push({
       type: "MeshMessage",
