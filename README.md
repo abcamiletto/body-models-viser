@@ -6,9 +6,73 @@ Python owns the body model asset loaders and the `prepare_identity()` /
 `prepare_pose()` calls. TypeScript owns the browser model lifecycle and WASM
 buffers. Rust owns the stateless `forward_vertices()` kernel.
 
+## Usage
+
+### Skinned Body Models
+
+Use `add_body_model()` for non-rigid skinned body models such as SMPL, SMPL-X,
+MANO, FLAME, MHR, SKEL, ANNY, and SOMA.
+
+```python
+import body_models_viser as bmv
+import viser
+from body_models.smpl.numpy import SMPL
+
+server = viser.ViserServer()
+model = SMPL(gender="neutral")
+handle = bmv.add_body_model(server.scene, "/smpl", model, color=(173, 216, 230))
+
+pose = handle.body_pose.copy()
+pose[2, 0] = 0.5
+handle.body_pose = pose
+```
+
+`add_body_model()` returns a model-specific handle with `set_pose(...)`,
+`remove()`, `global_rotation`, `global_translation`, and the pose properties
+supported by that model.
+
+### Skeletons
+
+Use `add_skeleton()` for a standalone clickable skeleton. It takes joint
+positions and a parent index for each joint.
+
+```python
+import body_models_viser as bmv
+
+pose = model.get_rest_pose()
+skeleton = model.forward_skeleton(**pose)
+joint_positions = skeleton[:, :3, 3]
+
+handle = bmv.add_skeleton(
+    server.scene,
+    "/skeleton",
+    joint_positions,
+    model.parents,
+    joint_names=tuple(model.joint_names),
+)
+
+handle.visible = True
+handle.joint_positions = joint_positions
+```
+
+### Rigid Body Models
+
+Use `add_rigid_body_model()` for rigid articulated models that expose
+`link_names`, `link_mesh(link_name)`, and `forward_links(...)`.
+
+```python
+import body_models_viser as bmv
+
+handle = bmv.add_rigid_body_model(server.scene, "/robot", model)
+handle.set_pose(body_pose=handle.pose["body_pose"])
+```
+
+The rigid-body helper renders one static mesh per link, then updates link
+transforms when the pose changes.
+
 ## Runtime
 
-`bmv.add_body_model(scene, name, smpl)` does three things:
+`bmv.add_body_model(scene, name, model)` does three things:
 
 1. Injects `body-models-viser.js` and `body-models-viser.wasm`.
 2. Sends faces, material props, current identity, and current pose as

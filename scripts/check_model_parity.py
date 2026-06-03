@@ -14,7 +14,7 @@ from body_models.smpl.numpy import SMPL
 from body_models.smplh.numpy import SMPLH
 from body_models.smplx.numpy import SMPLX
 from body_models.soma.numpy import SOMA
-from body_models_viser._viser import _prepare_identity, _prepare_pose
+from body_models_viser._body_model import _prepare_identity, _prepare_pose
 
 
 def main() -> None:

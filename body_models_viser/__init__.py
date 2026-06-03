@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from ._rigid_body import ViserRigidBodyModelHandle, add_rigid_body_model
 from ._skeleton import ViserSkeletonHandle, add_skeleton
-from ._viser import (
+from ._body_model import (
     AnnyBodyHandle,
     BodyModelHandle,
     FlameBodyHandle,
@@ -16,7 +16,7 @@ from ._viser import (
     add_body_model,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "AnnyBodyHandle",
