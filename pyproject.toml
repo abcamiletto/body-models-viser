@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "body-models-viser"
-version = "0.0.2"
+version = "0.1.0"
 description = "Browser-side body model evaluation for viser"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "body-models==0.12.0",
+  "body-models==0.13.3",
   "jaxtyping",
   "nodeenv",
   "numpy",
@@ -41,3 +41,8 @@ only-include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["body_models_viser"]
+
+[dependency-groups]
+dev = [
+    "wasmtime>=45.0.0",
+]

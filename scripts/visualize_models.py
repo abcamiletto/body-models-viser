@@ -1,16 +1,3 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#   "body-models",
-#   "body-models-viser",
-#   "numpy",
-#   "viser",
-# ]
-# [tool.uv.sources]
-# body-models = { path = "../../body-models", editable = true }
-# body-models-viser = { path = "..", editable = true }
-# ///
-
 from __future__ import annotations
 
 import time

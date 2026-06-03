@@ -2,48 +2,25 @@ use glam::{Mat4, Vec3};
 
 pub struct ForwardInputs<'a> {
     pub lbs_weights: &'a [f32],
-    pub rest_joints: &'a [f32],
     pub rest_vertices: &'a [f32],
-    pub joint_transforms: &'a [f32],
-    pub pose_offsets: &'a [f32],
-    pub global_rotation: &'a [f32],
-    pub global_translation: &'a [f32],
-}
-
-pub struct SkinInputs<'a> {
-    pub lbs_weights: &'a [f32],
-    pub rest_vertices: &'a [f32],
-    pub bone_transforms: &'a [f32],
+    pub skinning_transforms: &'a [f32],
     pub pose_offsets: &'a [f32],
     pub global_rotation: &'a [f32],
     pub global_translation: &'a [f32],
 }
 
 pub fn forward_vertices(inputs: ForwardInputs<'_>, output_vertices: &mut [f32]) {
-    let joint_count = inputs.rest_joints.len() / 3;
-    let joint_transforms = (0..joint_count)
-        .map(|joint| transform_for_joint(&inputs, joint))
+    let bone_count = inputs.skinning_transforms.len() / 16;
+    let skinning_transforms = (0..bone_count)
+        .map(|bone| {
+            let start = 16 * bone;
+            mat4_from_rows(&inputs.skinning_transforms[start..start + 16])
+        })
         .collect::<Vec<_>>();
     skin_with_transforms(
         inputs.lbs_weights,
         inputs.rest_vertices,
-        &joint_transforms,
-        inputs.pose_offsets,
-        inputs.global_rotation,
-        inputs.global_translation,
-        output_vertices,
-    );
-}
-
-pub fn skin_vertices(inputs: SkinInputs<'_>, output_vertices: &mut [f32]) {
-    let bone_count = inputs.bone_transforms.len() / 16;
-    let bone_transforms = (0..bone_count)
-        .map(|bone| mat4_from_rows(&inputs.bone_transforms[16 * bone..16 * bone + 16]))
-        .collect::<Vec<_>>();
-    skin_with_transforms(
-        inputs.lbs_weights,
-        inputs.rest_vertices,
-        &bone_transforms,
+        &skinning_transforms,
         inputs.pose_offsets,
         inputs.global_rotation,
         inputs.global_translation,
@@ -54,13 +31,13 @@ pub fn skin_vertices(inputs: SkinInputs<'_>, output_vertices: &mut [f32]) {
 fn skin_with_transforms(
     lbs_weights: &[f32],
     rest_vertices: &[f32],
-    bone_transforms: &[Mat4],
+    skinning_transforms: &[Mat4],
     pose_offsets: &[f32],
     global_rotation: &[f32],
     global_translation: &[f32],
     output_vertices: &mut [f32],
 ) {
-    let bone_count = bone_transforms.len();
+    let bone_count = skinning_transforms.len();
     let vertex_count = rest_vertices.len() / 3;
     let global_rotation = vec3(global_rotation, 0);
     let global = Mat4::from_rotation_translation(
@@ -76,18 +53,13 @@ fn skin_with_transforms(
         let weights = &lbs_weights[vertex * bone_count..(vertex + 1) * bone_count];
         let mut transform = Mat4::ZERO;
         for (joint, &weight) in weights.iter().enumerate() {
-            transform += bone_transforms[joint] * weight;
+            transform += skinning_transforms[joint] * weight;
         }
         let output = global.transform_point3(transform.transform_point3(point));
         output_vertices[3 * vertex] = output.x;
         output_vertices[3 * vertex + 1] = output.y;
         output_vertices[3 * vertex + 2] = output.z;
     }
-}
-
-fn transform_for_joint(inputs: &ForwardInputs<'_>, joint: usize) -> Mat4 {
-    mat4_from_rows(&inputs.joint_transforms[16 * joint..16 * joint + 16])
-        * Mat4::from_translation(-vec3(inputs.rest_joints, joint))
 }
 
 fn vec3(values: &[f32], index: usize) -> Vec3 {
@@ -113,9 +85,8 @@ mod tests {
     fn forward_vertices_applies_pose_and_global_transform() {
         let inputs = ForwardInputs {
             lbs_weights: &[1.0],
-            rest_joints: &[0.0, 0.0, 0.0],
             rest_vertices: &[1.0, 2.0, 3.0],
-            joint_transforms: &[
+            skinning_transforms: &[
                 1.0, 0.0, 0.0, 4.0, 0.0, 1.0, 0.0, 5.0, 0.0, 0.0, 1.0, 6.0, 0.0, 0.0, 0.0, 1.0,
             ],
             pose_offsets: &[0.5, 1.0, 1.5],

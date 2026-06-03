@@ -2,10 +2,9 @@
 
 Browser-side body model evaluation for viser.
 
-This package intentionally supports SMPL only right now. Python owns the
-`body_models.smpl.numpy.SMPL` asset loader and the `prepare_identity()` /
+Python owns the body model asset loaders and the `prepare_identity()` /
 `prepare_pose()` calls. TypeScript owns the browser model lifecycle and WASM
-buffers. Rust owns stateless `forward_vertices()` kernels.
+buffers. Rust owns the stateless `forward_vertices()` kernel.
 
 ## Runtime
 
@@ -14,18 +13,19 @@ buffers. Rust owns stateless `forward_vertices()` kernels.
 1. Injects `body-models-viser.js` and `body-models-viser.wasm`.
 2. Sends faces, material props, current identity, and current pose as
    little-endian binary buffers.
-3. Returns a `SmplBodyHandle`.
+3. Returns a body model handle.
 
-Every `handle.set_pose(...)` call sends prepared pose data. If `shape` changes,
-Python recomputes `prepare_identity()` and sends that identity again. TypeScript
-copies changed buffers into persistent WASM memory, calls the Rust
+Every `handle.set_pose(...)` call sends prepared pose data. If identity-changing
+parameters such as `shape`, `expression`, or `scale_params` change, Python
+recomputes `prepare_identity()` and sends that identity again. TypeScript copies
+changed buffers into persistent WASM memory, calls the Rust
 `forward_vertices()` kernel, and forwards the resulting vertex buffer to viser
 as a regular mesh message.
 
-The browser protocol is model-agnostic: model messages carry a `model_type`
-discriminator, and pose/remove/replay lifecycle is shared. Adding another body
-model should only add the Python preparation adapter and one Rust
-`forward_vertices()` kernel for that model.
+The browser protocol is model-agnostic: Python adapts each model to a shared
+runtime payload containing skinning weights, rest vertices, skinning transforms,
+and pose offsets. Adding another body model should only require a Python
+preparation adapter when its `body-models` outputs need normalization.
 
 ## Development
 
@@ -55,8 +55,8 @@ Run the small visualizer:
 uv run --no-sync scripts/visualize_models.py
 ```
 
-Check SMPL NumPy/WASM vertex parity:
+Check NumPy/WASM vertex parity for all supported models:
 
 ```sh
-uv run scripts/check_smpl_parity.py
+uv run scripts/check_model_parity.py
 ```

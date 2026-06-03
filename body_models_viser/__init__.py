@@ -14,7 +14,7 @@ from ._viser import (
     add_body_model,
 )
 
-__version__ = "0.0.2"
+__version__ = "0.1.0"
 
 __all__ = [
     "AnnyBodyHandle",
