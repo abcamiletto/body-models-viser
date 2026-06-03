@@ -6,6 +6,7 @@ from ._body_model import (
     AnnyBodyHandle,
     BodyModelHandle,
     FlameBodyHandle,
+    GarmentMeasurementsBodyHandle,
     ManoBodyHandle,
     MhrBodyHandle,
     SkelBodyHandle,
@@ -16,12 +17,13 @@ from ._body_model import (
     add_body_model,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "AnnyBodyHandle",
     "BodyModelHandle",
     "FlameBodyHandle",
+    "GarmentMeasurementsBodyHandle",
     "ManoBodyHandle",
     "MhrBodyHandle",
     "SkelBodyHandle",

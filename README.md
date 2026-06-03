@@ -11,7 +11,7 @@ buffers. Rust owns the stateless `forward_vertices()` kernel.
 ### Skinned Body Models
 
 Use `add_body_model()` for non-rigid skinned body models such as SMPL, SMPL-X,
-MANO, FLAME, MHR, SKEL, ANNY, and SOMA.
+MANO, FLAME, MHR, SKEL, ANNY, GarmentMeasurements, and SOMA.
 
 ```python
 import body_models_viser as bmv

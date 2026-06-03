@@ -11,6 +11,8 @@ import numpy as np
 import numpy.typing as npt
 from body_models.anny.numpy import ANNY
 from body_models.flame.numpy import FLAME
+from body_models.garment_measurements.numpy import GarmentMeasurements
+from body_models.garment_measurements.pose import pack_pose
 from body_models.mano.numpy import MANO
 from body_models.mhr.numpy import MHR
 from body_models.skel.numpy import SKEL
@@ -76,7 +78,7 @@ class BodyModelHandle:
         self.pose = pose
         self.identity = identity
         self.identity_keys = _parameter_keys(model.prepare_identity, pose.keys())
-        self.pose_keys = _parameter_keys(model.prepare_pose, pose.keys()) - {"global_rotation"}
+        self.pose_keys = _pose_keys(model, pose.keys())
 
     @property
     def global_rotation(self) -> Float[np.ndarray, "3"]:
@@ -138,6 +140,14 @@ class FlameBodyHandle(BodyModelHandle):
     head_rotation = _pose_property("head_rotation")
 
 
+class GarmentMeasurementsBodyHandle(BodyModelHandle):
+    shape = _pose_property("shape")
+    body_pose = _pose_property("body_pose")
+    head_pose = _pose_property("head_pose")
+    hand_pose = _pose_property("hand_pose")
+    pelvis_rotation = _pose_property("pelvis_rotation")
+
+
 class ManoBodyHandle(BodyModelHandle):
     shape = _pose_property("shape")
     hand_pose = _pose_property("hand_pose")
@@ -188,6 +198,7 @@ class SomaBodyHandle(BodyModelHandle):
 _HANDLE_TYPES = (
     (ANNY, AnnyBodyHandle),
     (FLAME, FlameBodyHandle),
+    (GarmentMeasurements, GarmentMeasurementsBodyHandle),
     (MANO, ManoBodyHandle),
     (MHR, MhrBodyHandle),
     (SKEL, SkelBodyHandle),
@@ -371,6 +382,10 @@ def _prepare_pose(
     params: dict[str, Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]],
     identity: dict[str, Any],
 ) -> dict[str, Any]:
+    if "pose" in inspect.signature(model.prepare_pose).parameters:
+        pose = pack_pose(np, params["pelvis_rotation"], params["body_pose"], params["head_pose"], params["hand_pose"])
+        return model.prepare_pose(pose, identity=identity)
+
     pose_params = {}
     for key in _parameter_keys(model.prepare_pose, params.keys()):
         pose_params[key] = np.zeros_like(params[key]) if key == "global_rotation" else params[key]
@@ -388,3 +403,10 @@ def _prepare_identity(
 def _parameter_keys(method: Callable[..., Any], keys: Iterable[str]) -> set[str]:
     parameters = inspect.signature(method).parameters
     return set(parameters) & set(keys)
+
+
+def _pose_keys(model: Any, keys: Iterable[str]) -> set[str]:
+    parameters = inspect.signature(model.prepare_pose).parameters
+    if "pose" in parameters:
+        return {"body_pose", "head_pose", "hand_pose", "pelvis_rotation"} & set(keys)
+    return (set(parameters) & set(keys)) - {"global_rotation"}

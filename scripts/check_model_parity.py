@@ -7,6 +7,7 @@ import numpy as np
 import wasmtime
 from body_models.anny.numpy import ANNY
 from body_models.flame.numpy import FLAME
+from body_models.garment_measurements.numpy import GarmentMeasurements
 from body_models.mano.numpy import MANO
 from body_models.mhr.numpy import MHR
 from body_models.skel.numpy import SKEL
@@ -72,6 +73,7 @@ def main() -> None:
 MODELS: list[tuple[str, Callable[[], Any]]] = [
     ("ANNY", ANNY),
     ("FLAME", FLAME),
+    ("GarmentMeasurements", GarmentMeasurements),
     ("MANO", lambda: MANO(side="right")),
     ("MHR", MHR),
     ("SKEL", lambda: SKEL(gender="male")),
