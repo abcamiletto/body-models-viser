@@ -25,11 +25,19 @@ handle = bmv.add_body_model(server.scene, "/smpl", model, color=(173, 216, 230))
 pose = handle.body_pose.copy()
 pose[2, 0] = 0.5
 handle.body_pose = pose
+
+translation = handle.global_translation.copy()
+translation[1] = 0.25
+handle.set_transform(global_translation=translation)
+
+shape = handle.shape.copy()
+shape[0] = 1.0
+handle.set_identity(shape=shape)
 ```
 
-`add_body_model()` returns a model-specific handle with `set_pose(...)`,
-`remove()`, `global_rotation`, `global_translation`, and the pose properties
-supported by that model.
+`add_body_model()` returns a model-specific handle with `set_identity(...)`,
+`set_pose(...)`, `set_transform(...)`, `remove()`, `global_rotation`,
+`global_translation`, and the pose properties supported by that model.
 
 ### Skeletons
 
@@ -79,12 +87,12 @@ transforms when the pose changes.
    little-endian binary buffers.
 3. Returns a body model handle.
 
-Every `handle.set_pose(...)` call sends prepared pose data. If identity-changing
-parameters such as `shape`, `expression`, or `scale_params` change, Python
-recomputes `prepare_identity()` and sends that identity again. TypeScript copies
-changed buffers into persistent WASM memory, calls the Rust
-`forward_vertices()` kernel, and forwards the resulting vertex buffer to viser
-as a regular mesh message.
+`handle.set_identity(...)` recomputes `prepare_identity()`, then prepares and
+sends updated skinning data. `handle.set_pose(...)` reuses the cached identity
+and sends updated pose-dependent skinning data. `handle.set_transform(...)`
+updates only global transform buffers. TypeScript copies changed buffers into
+persistent WASM memory, calls the Rust `forward_vertices()` kernel, and forwards
+the resulting vertex buffer to viser as a regular mesh message.
 
 The browser protocol is model-agnostic: Python adapts each model to a shared
 runtime payload containing skinning weights, rest vertices, skinning transforms,

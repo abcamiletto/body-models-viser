@@ -86,7 +86,7 @@ class BodyModelHandle:
 
     @global_rotation.setter
     def global_rotation(self, value: Float[np.ndarray, "3"]) -> None:
-        self.set_pose(global_rotation=value)
+        self.set_transform(global_rotation=value)
 
     @property
     def global_translation(self) -> Float[np.ndarray, "3"]:
@@ -94,26 +94,64 @@ class BodyModelHandle:
 
     @global_translation.setter
     def global_translation(self, value: Float[np.ndarray, "3"]) -> None:
-        self.set_pose(global_translation=value)
+        self.set_transform(global_translation=value)
 
-    def set_pose(self, **params: Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]) -> None:
-        changed_keys = params.keys()
-        identity_changed = bool(self.identity_keys & changed_keys)
-        pose_changed = identity_changed or bool(self.pose_keys & changed_keys)
-        for key, value in params.items():
-            self.pose[key] = np.asarray(value, dtype=np.float32).copy()
-        if identity_changed:
-            self.identity = _prepare_identity(self.model, self.pose)
-        prepared_pose = _prepare_pose(self.model, self.pose, self.identity) if pose_changed else None
+    def set_identity(self, **params: Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]) -> None:
+        invalid = params.keys() - self.identity_keys
+        if invalid:
+            raise ValueError(f"Invalid identity parameter(s): {', '.join(sorted(invalid))}.")
+        self._update_pose(params)
+        self.identity = _prepare_identity(self.model, self.pose)
+        prepared_pose = _prepare_pose(self.model, self.pose, self.identity)
         message = _pose_message(self.model, self.name, self.pose, self.identity, prepared_pose)
         _runtime_state(self.scene).poses[self.name] = message
         _queue_ready_clients(self.scene, message)
+
+    def set_pose(self, **params: Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]) -> None:
+        invalid = params.keys() - self.pose_keys
+        if invalid:
+            raise ValueError(f"Invalid pose parameter(s): {', '.join(sorted(invalid))}.")
+        self._update_pose(params)
+        prepared_pose = _prepare_pose(self.model, self.pose, self.identity)
+        message = _pose_message(self.model, self.name, self.pose, self.identity, prepared_pose)
+        _runtime_state(self.scene).poses[self.name] = message
+        _queue_ready_clients(self.scene, message)
+
+    def set_transform(self, **params: Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]) -> None:
+        invalid = params.keys() - {"global_rotation", "global_translation"}
+        if invalid:
+            raise ValueError(f"Invalid transform parameter(s): {', '.join(sorted(invalid))}.")
+        self._update_pose(params)
+        message = BodyModelsViserPoseMessage(
+            name=self.name,
+            rest_vertices=None,
+            skinning_transforms=None,
+            pose_offsets=None,
+            global_rotation=np.ascontiguousarray(self.pose["global_rotation"], dtype="<f4"),
+            global_translation=np.ascontiguousarray(self.pose["global_translation"], dtype="<f4"),
+        )
+        _runtime_state(self.scene).poses[self.name] = message
+        _queue_ready_clients(self.scene, message)
+
+    def _update_pose(self, params: dict[str, Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]]) -> None:
+        for key, value in params.items():
+            self.pose[key] = np.asarray(value, dtype=np.float32).copy()
 
     def remove(self) -> None:
         state = _runtime_state(self.scene)
         del state.models[self.name]
         state.poses.pop(self.name, None)
         _queue_ready_clients(self.scene, _messages.RemoveSceneNodeMessage(self.name))
+
+
+def _identity_property(key: str) -> property:
+    def get(self: BodyModelHandle) -> np.ndarray:
+        return self.pose[key]
+
+    def set(self: BodyModelHandle, value: np.ndarray) -> None:
+        self.set_identity(**{key: value})
+
+    return property(get, set)
 
 
 def _pose_property(key: str) -> property:
@@ -127,21 +165,21 @@ def _pose_property(key: str) -> property:
 
 
 class AnnyBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
+    shape = _identity_property("shape")
     body_pose = _pose_property("body_pose")
     head_pose = _pose_property("head_pose")
     hand_pose = _pose_property("hand_pose")
 
 
 class FlameBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
-    expression = _pose_property("expression")
+    shape = _identity_property("shape")
+    expression = _identity_property("expression")
     head_pose = _pose_property("head_pose")
     head_rotation = _pose_property("head_rotation")
 
 
 class GarmentMeasurementsBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
+    shape = _identity_property("shape")
     body_pose = _pose_property("body_pose")
     head_pose = _pose_property("head_pose")
     hand_pose = _pose_property("hand_pose")
@@ -149,39 +187,39 @@ class GarmentMeasurementsBodyHandle(BodyModelHandle):
 
 
 class ManoBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
+    shape = _identity_property("shape")
     hand_pose = _pose_property("hand_pose")
     wrist_rotation = _pose_property("wrist_rotation")
 
 
 class MhrBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
-    expression = _pose_property("expression")
+    shape = _identity_property("shape")
+    expression = _identity_property("expression")
     body_pose = _pose_property("body_pose")
     hand_pose = _pose_property("hand_pose")
 
 
 class SkelBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
+    shape = _identity_property("shape")
     body_pose = _pose_property("body_pose")
 
 
 class SmplBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
+    shape = _identity_property("shape")
     body_pose = _pose_property("body_pose")
     pelvis_rotation = _pose_property("pelvis_rotation")
 
 
 class SmplhBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
+    shape = _identity_property("shape")
     body_pose = _pose_property("body_pose")
     hand_pose = _pose_property("hand_pose")
     pelvis_rotation = _pose_property("pelvis_rotation")
 
 
 class SmplxBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
-    expression = _pose_property("expression")
+    shape = _identity_property("shape")
+    expression = _identity_property("expression")
     body_pose = _pose_property("body_pose")
     hand_pose = _pose_property("hand_pose")
     head_pose = _pose_property("head_pose")
@@ -189,7 +227,7 @@ class SmplxBodyHandle(BodyModelHandle):
 
 
 class SomaBodyHandle(BodyModelHandle):
-    shape = _pose_property("shape")
+    shape = _identity_property("shape")
     body_pose = _pose_property("body_pose")
     head_pose = _pose_property("head_pose")
     hand_pose = _pose_property("hand_pose")
@@ -350,28 +388,20 @@ def _pose_message(
     name: str,
     pose: dict[str, Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]],
     identity: dict[str, Any],
-    prepared_pose: dict[str, Any] | None,
+    prepared_pose: dict[str, Any],
 ) -> BodyModelsViserPoseMessage:
-    if prepared_pose is not None:
-        skinning = model.prepare_skinning(identity=identity, pose=prepared_pose)
-        skinning_rest_vertices = skinning["rest_vertices"]
-        if "pose_offsets" in skinning:
-            skinning_pose_offsets = skinning["pose_offsets"]
-        else:
-            skinning_pose_offsets = np.zeros_like(skinning_rest_vertices)
-        rest_vertices = np.ascontiguousarray(skinning_rest_vertices, dtype="<f4")
-        skinning_transforms = np.ascontiguousarray(skinning["skinning_transforms"], dtype="<f4")
-        pose_offsets = np.ascontiguousarray(skinning_pose_offsets, dtype="<f4")
+    skinning = model.prepare_skinning(identity=identity, pose=prepared_pose)
+    skinning_rest_vertices = skinning["rest_vertices"]
+    if "pose_offsets" in skinning:
+        skinning_pose_offsets = skinning["pose_offsets"]
     else:
-        rest_vertices = None
-        skinning_transforms = None
-        pose_offsets = None
+        skinning_pose_offsets = np.zeros_like(skinning_rest_vertices)
 
     return BodyModelsViserPoseMessage(
         name=name,
-        rest_vertices=rest_vertices,
-        skinning_transforms=skinning_transforms,
-        pose_offsets=pose_offsets,
+        rest_vertices=np.ascontiguousarray(skinning_rest_vertices, dtype="<f4"),
+        skinning_transforms=np.ascontiguousarray(skinning["skinning_transforms"], dtype="<f4"),
+        pose_offsets=np.ascontiguousarray(skinning_pose_offsets, dtype="<f4"),
         global_rotation=np.ascontiguousarray(pose["global_rotation"], dtype="<f4"),
         global_translation=np.ascontiguousarray(pose["global_translation"], dtype="<f4"),
     )

@@ -4,3 +4,5 @@
 /client/dist
 /client/node_modules
 /dist
+__pycache__/
+*.py[cod]
