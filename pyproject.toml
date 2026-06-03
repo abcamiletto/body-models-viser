@@ -9,7 +9,7 @@ description = "Browser-side body model evaluation for viser"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "body-models==0.13.4",
+  "body-models==0.14.0",
   "jaxtyping",
   "nodeenv",
   "numpy",

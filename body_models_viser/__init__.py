@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ._rigid_body import ViserRigidBodyModelHandle, add_rigid_body_model
 from ._skeleton import ViserSkeletonHandle, add_skeleton
 from ._viser import (
     AnnyBodyHandle,
@@ -28,7 +29,9 @@ __all__ = [
     "SmplhBodyHandle",
     "SmplxBodyHandle",
     "SomaBodyHandle",
+    "ViserRigidBodyModelHandle",
     "ViserSkeletonHandle",
     "add_body_model",
+    "add_rigid_body_model",
     "add_skeleton",
 ]

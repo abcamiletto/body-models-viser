@@ -22,7 +22,7 @@ wheels = [
 
 [[package]]
 name = "body-models"
-version = "0.13.4"
+version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "array-api-compat" },
@@ -35,9 +35,9 @@ dependencies = [
     { name = "scipy" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/65/a2630ad0451b1982bb383e210202f6cf8c2a90a6144740ab339f9424008a/body_models-0.13.4.tar.gz", hash = "sha256:5a1d86cf36c47bb74e27496c8b20bfc3e83103ae51193f30cab7aac315ad6ee0", size = 167022, upload-time = "2026-06-03T09:37:08.345Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/67/eb5e7290dd8848b37411a90dd9c7295135e06a1bb7e360f96accf2e048e7/body_models-0.14.0.tar.gz", hash = "sha256:41c00dd4940ce71a2f520a48c1ad74c2b609849055ba2db06ef3545af0c37d0d", size = 162946, upload-time = "2026-06-03T11:11:37.731Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/da/32b9938a2602d0d0919ca0c2e4ffe4781be361cc0d34132f41622ad62c19/body_models-0.13.4-py3-none-any.whl", hash = "sha256:c8bbdeaa06d6fe9cc8fd58ef0c7e037e9e643bc37dd75b5c8a1730b78c0f63bd", size = 297583, upload-time = "2026-06-03T09:37:07.034Z" },
+    { url = "https://files.pythonhosted.org/packages/91/0b/daa44ecbcc8a9c85fc81c799794cc19af773ff0103ba97ce4703d93441d0/body_models-0.14.0-py3-none-any.whl", hash = "sha256:878365f825a981f7012f91da10c1984e52e9f81b2490de067276ac37d5e51aef", size = 290564, upload-time = "2026-06-03T11:11:38.863Z" },
 ]
 
 [[package]]
@@ -59,7 +59,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "body-models", specifier = "==0.13.4" },
+    { name = "body-models", specifier = "==0.14.0" },
     { name = "jaxtyping" },
     { name = "nodeenv" },
     { name = "numpy" },
