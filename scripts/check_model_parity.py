@@ -14,7 +14,7 @@ from body_models.smpl.numpy import SMPL
 from body_models.smplh.numpy import SMPLH
 from body_models.smplx.numpy import SMPLX
 from body_models.soma.numpy import SOMA
-from body_models_viser._viser import _prepare_identity, _prepare_pose, _runtime_inputs
+from body_models_viser._viser import _prepare_identity, _prepare_pose
 
 
 def main() -> None:
@@ -36,13 +36,14 @@ def main() -> None:
         params["global_translation"] = np.array([0.1, -0.2, 0.3], dtype=np.float32)
         identity = _prepare_identity(model, params)
         pose = _prepare_pose(model, params, identity)
-        runtime_inputs = _runtime_inputs(model, identity, pose)
+        skinning = model.prepare_skinning(identity=identity, pose=pose)
+        pose_offsets_array = skinning["pose_offsets"] if "pose_offsets" in skinning else np.zeros_like(skinning["rest_vertices"])
         expected = model.forward_vertices(**params, identity=identity)
 
-        lbs_weights = write_f32(store, memory, alloc, runtime_inputs.lbs_weights)
-        rest_vertices = write_f32(store, memory, alloc, runtime_inputs.rest_vertices)
-        skinning_transforms = write_f32(store, memory, alloc, runtime_inputs.skinning_transforms)
-        pose_offsets = write_f32(store, memory, alloc, runtime_inputs.pose_offsets)
+        lbs_weights = write_f32(store, memory, alloc, skinning["skin_weights"])
+        rest_vertices = write_f32(store, memory, alloc, skinning["rest_vertices"])
+        skinning_transforms = write_f32(store, memory, alloc, skinning["skinning_transforms"])
+        pose_offsets = write_f32(store, memory, alloc, pose_offsets_array)
         global_rotation = write_f32(store, memory, alloc, params["global_rotation"])
         global_translation = write_f32(store, memory, alloc, params["global_translation"])
         output = alloc(store, expected.size * 4)
@@ -50,13 +51,13 @@ def main() -> None:
         forward(
             store,
             lbs_weights,
-            runtime_inputs.lbs_weights.size,
+            skinning["skin_weights"].size,
             rest_vertices,
-            runtime_inputs.rest_vertices.size,
+            skinning["rest_vertices"].size,
             skinning_transforms,
-            runtime_inputs.skinning_transforms.size,
+            skinning["skinning_transforms"].size,
             pose_offsets,
-            runtime_inputs.pose_offsets.size,
+            pose_offsets_array.size,
             global_rotation,
             global_translation,
             output,

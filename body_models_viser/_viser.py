@@ -61,14 +61,6 @@ class _RuntimeState:
     poses: dict[str, BodyModelsViserPoseMessage] = dataclasses.field(default_factory=dict)
 
 
-@dataclasses.dataclass(frozen=True)
-class _RuntimeInputs:
-    lbs_weights: np.ndarray
-    rest_vertices: np.ndarray
-    skinning_transforms: np.ndarray
-    pose_offsets: np.ndarray
-
-
 class BodyModelHandle:
     def __init__(
         self,
@@ -221,13 +213,22 @@ def add_body_model(
     cast_shadow: bool = True,
     receive_shadow: bool | float = True,
 ) -> BodyModelHandle:
-    handle_type = _handle_type(model)
+    for model_type, handle_type in _HANDLE_TYPES:
+        if isinstance(model, model_type):
+            break
+    else:
+        raise TypeError(f"Unsupported body model {type(model).__name__}.")
 
     rest_pose = model.get_rest_pose()
     pose = {key: np.asarray(value, dtype=np.float32).copy() for key, value in rest_pose.items()}
     identity = _prepare_identity(model, pose)
     prepared_pose = _prepare_pose(model, pose, identity)
-    runtime_inputs = _runtime_inputs(model, identity, prepared_pose)
+    skinning = model.prepare_skinning(identity=identity, pose=prepared_pose)
+    rest_vertices = skinning["rest_vertices"]
+    if "pose_offsets" in skinning:
+        pose_offsets = skinning["pose_offsets"]
+    else:
+        pose_offsets = np.zeros_like(rest_vertices)
     props = {
         "color": color,
         "wireframe": wireframe,
@@ -241,12 +242,12 @@ def add_body_model(
     }
     message = BodyModelsViserModelMessage(
         name=name,
-        vertex_count=int(runtime_inputs.rest_vertices.shape[0]),
-        lbs_weights=np.ascontiguousarray(runtime_inputs.lbs_weights, dtype="<f4"),
-        faces=np.ascontiguousarray(model.faces, dtype="<u4"),
-        rest_vertices=np.ascontiguousarray(runtime_inputs.rest_vertices, dtype="<f4"),
-        skinning_transforms=np.ascontiguousarray(runtime_inputs.skinning_transforms, dtype="<f4"),
-        pose_offsets=np.ascontiguousarray(runtime_inputs.pose_offsets, dtype="<f4"),
+        vertex_count=int(rest_vertices.shape[0]),
+        lbs_weights=np.ascontiguousarray(skinning["skin_weights"], dtype="<f4"),
+        faces=np.ascontiguousarray(skinning["faces"], dtype="<u4"),
+        rest_vertices=np.ascontiguousarray(rest_vertices, dtype="<f4"),
+        skinning_transforms=np.ascontiguousarray(skinning["skinning_transforms"], dtype="<f4"),
+        pose_offsets=np.ascontiguousarray(pose_offsets, dtype="<f4"),
         global_rotation=np.ascontiguousarray(pose["global_rotation"], dtype="<f4"),
         global_translation=np.ascontiguousarray(pose["global_translation"], dtype="<f4"),
         props=props,
@@ -280,13 +281,6 @@ def _runtime_state(scene: Any) -> _RuntimeState:
 
     websock.register_handler(BodyModelsViserReadyMessage, ready)
     return state
-
-
-def _handle_type(model: Any) -> type[BodyModelHandle]:
-    for model_type, handle_type in _HANDLE_TYPES:
-        if isinstance(model, model_type):
-            return handle_type
-    raise TypeError(f"Unsupported body model {type(model).__name__}.")
 
 
 def _install_connected_clients(scene: Any, state: _RuntimeState) -> None:
@@ -325,7 +319,8 @@ def _replay_state(client_state: Any, state: _RuntimeState) -> None:
 def _install_javascript() -> str:
     ensure_client_is_built()
     source = (files(__package__) / "client" / "body-models-viser.js").read_text()
-    wasm = base64.b64encode(_wasm_bytes()).decode("ascii")
+    wasm_path = files(__package__) / "client" / "body-models-viser.wasm"
+    wasm = base64.b64encode(wasm_path.read_bytes()).decode("ascii")
     return f"""
 (() => {{
   if (window.BodyModelsViser !== undefined) {{
@@ -339,11 +334,6 @@ def _install_javascript() -> str:
 """
 
 
-def _wasm_bytes() -> bytes:
-    ensure_client_is_built()
-    return (files(__package__) / "client" / "body-models-viser.wasm").read_bytes()
-
-
 def _pose_message(
     model: Any,
     name: str,
@@ -352,10 +342,15 @@ def _pose_message(
     prepared_pose: dict[str, Any] | None,
 ) -> BodyModelsViserPoseMessage:
     if prepared_pose is not None:
-        runtime_inputs = _runtime_inputs(model, identity, prepared_pose)
-        rest_vertices = np.ascontiguousarray(runtime_inputs.rest_vertices, dtype="<f4")
-        skinning_transforms = np.ascontiguousarray(runtime_inputs.skinning_transforms, dtype="<f4")
-        pose_offsets = np.ascontiguousarray(runtime_inputs.pose_offsets, dtype="<f4")
+        skinning = model.prepare_skinning(identity=identity, pose=prepared_pose)
+        skinning_rest_vertices = skinning["rest_vertices"]
+        if "pose_offsets" in skinning:
+            skinning_pose_offsets = skinning["pose_offsets"]
+        else:
+            skinning_pose_offsets = np.zeros_like(skinning_rest_vertices)
+        rest_vertices = np.ascontiguousarray(skinning_rest_vertices, dtype="<f4")
+        skinning_transforms = np.ascontiguousarray(skinning["skinning_transforms"], dtype="<f4")
+        pose_offsets = np.ascontiguousarray(skinning_pose_offsets, dtype="<f4")
     else:
         rest_vertices = None
         skinning_transforms = None
@@ -388,24 +383,6 @@ def _prepare_identity(
 ) -> dict[str, Any]:
     identity_params = {key: params[key] for key in _parameter_keys(model.prepare_identity, params.keys())}
     return model.prepare_identity(**identity_params)
-
-
-def _runtime_inputs(
-    model: Any,
-    identity: dict[str, Any],
-    prepared_pose: dict[str, Any],
-) -> _RuntimeInputs:
-    if "pose_offsets" in prepared_pose:
-        pose_offsets = prepared_pose["pose_offsets"]
-    else:
-        pose_offsets = np.zeros_like(identity["rest_vertices"])
-
-    return _RuntimeInputs(
-        lbs_weights=model.skin_weights,
-        rest_vertices=identity["rest_vertices"],
-        skinning_transforms=prepared_pose["skinning_transforms"],
-        pose_offsets=pose_offsets,
-    )
 
 
 def _parameter_keys(method: Callable[..., Any], keys: Iterable[str]) -> set[str]:
