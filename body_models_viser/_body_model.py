@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import inspect
+import weakref
 from collections.abc import Callable, Iterable
 from importlib.resources import files
 from typing import Any
@@ -59,8 +60,12 @@ class BodyModelsViserReadyMessage(_messages.Message, include_in_scene_serializat
 class _RuntimeState:
     ready_clients: set[int] = dataclasses.field(default_factory=set)
     installed_clients: set[int] = dataclasses.field(default_factory=set)
+    initialized_serializers: weakref.WeakSet[Any] = dataclasses.field(
+        default_factory=weakref.WeakSet
+    )
     models: dict[str, BodyModelsViserModelMessage] = dataclasses.field(default_factory=dict)
     poses: dict[str, BodyModelsViserPoseMessage] = dataclasses.field(default_factory=dict)
+    connect_handler_installed: bool = False
 
 
 class BodyModelHandle:
@@ -104,7 +109,9 @@ class BodyModelHandle:
         self.identity = _prepare_identity(self.model, self.pose)
         prepared_pose = _prepare_pose(self.model, self.pose, self.identity)
         message = _pose_message(self.model, self.name, self.pose, self.identity, prepared_pose)
-        _runtime_state(self.scene).poses[self.name] = message
+        state = _runtime_state(self.scene)
+        state.poses[self.name] = message
+        _record_state_message(self.scene, state, message)
         _queue_ready_clients(self.scene, message)
 
     def set_pose(self, **params: Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]) -> None:
@@ -114,7 +121,9 @@ class BodyModelHandle:
         self._update_pose(params)
         prepared_pose = _prepare_pose(self.model, self.pose, self.identity)
         message = _pose_message(self.model, self.name, self.pose, self.identity, prepared_pose)
-        _runtime_state(self.scene).poses[self.name] = message
+        state = _runtime_state(self.scene)
+        state.poses[self.name] = message
+        _record_state_message(self.scene, state, message)
         _queue_ready_clients(self.scene, message)
 
     def set_transform(self, **params: Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]) -> None:
@@ -130,7 +139,9 @@ class BodyModelHandle:
             global_rotation=np.ascontiguousarray(self.pose["global_rotation"], dtype="<f4"),
             global_translation=np.ascontiguousarray(self.pose["global_translation"], dtype="<f4"),
         )
-        _runtime_state(self.scene).poses[self.name] = message
+        state = _runtime_state(self.scene)
+        state.poses[self.name] = message
+        _record_state_message(self.scene, state, message)
         _queue_ready_clients(self.scene, message)
 
     def _update_pose(self, params: dict[str, Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]]) -> None:
@@ -141,7 +152,9 @@ class BodyModelHandle:
         state = _runtime_state(self.scene)
         del state.models[self.name]
         state.poses.pop(self.name, None)
-        _queue_ready_clients(self.scene, _messages.RemoveSceneNodeMessage(self.name))
+        message = _messages.RemoveSceneNodeMessage(self.name)
+        _record_state_message(self.scene, state, message)
+        _queue_ready_clients(self.scene, message)
 
 
 def _identity_property(key: str) -> property:
@@ -304,12 +317,16 @@ def add_body_model(
     state = _runtime_state(scene)
     state.models[name] = message
     state.poses.pop(name, None)
+    _record_state_message(scene, state, message)
     _install_connected_clients(scene, state)
     _queue_ready_clients(scene, message)
 
-    @scene._websock_interface.on_client_connect
-    def _(client: Any) -> None:
-        _install_client_runtime(client, state)
+    if not state.connect_handler_installed:
+        state.connect_handler_installed = True
+
+        @scene._websock_interface.on_client_connect
+        def _(client: Any) -> None:
+            _install_client_runtime(client, state)
 
     return handle_type(scene, name, model, pose, identity)
 
@@ -322,6 +339,7 @@ def _runtime_state(scene: Any) -> _RuntimeState:
 
     state = _RuntimeState()
     setattr(websock, "_body_models_viser", state)
+    _install_serializer_hook(websock, state)
 
     def ready(client_id: int, _: BodyModelsViserReadyMessage) -> None:
         state.ready_clients.add(client_id)
@@ -330,6 +348,36 @@ def _runtime_state(scene: Any) -> _RuntimeState:
 
     websock.register_handler(BodyModelsViserReadyMessage, ready)
     return state
+
+
+def _install_serializer_hook(websock: Any, state: _RuntimeState) -> None:
+    original_get_message_serializer = websock.get_message_serializer
+
+    def get_message_serializer(filter: Callable[[_messages.Message], bool]) -> Any:
+        serializer = original_get_message_serializer(filter)
+        if state.models:
+            _ensure_serializer_runtime(serializer, state)
+        for name, message in state.models.items():
+            serializer._insert_message(message)
+            if name in state.poses:
+                serializer._insert_message(state.poses[name])
+        return serializer
+
+    websock.get_message_serializer = get_message_serializer
+
+
+def _record_state_message(scene: Any, state: _RuntimeState, message: _messages.Message) -> None:
+    websock = scene._websock_interface
+    for serializer in websock._record_handles:
+        _ensure_serializer_runtime(serializer, state)
+        serializer._insert_message(message)
+
+
+def _ensure_serializer_runtime(serializer: Any, state: _RuntimeState) -> None:
+    if serializer in state.initialized_serializers:
+        return
+    state.initialized_serializers.add(serializer)
+    serializer._insert_message(_messages.RunJavascriptMessage(_install_javascript()))
 
 
 def _install_connected_clients(scene: Any, state: _RuntimeState) -> None:
