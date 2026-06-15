@@ -17,7 +17,7 @@ from ._body_model import (
     add_body_model,
 )
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 __all__ = [
     "AnnyBodyHandle",

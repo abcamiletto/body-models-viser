@@ -377,7 +377,19 @@ def _ensure_serializer_runtime(serializer: Any, state: _RuntimeState) -> None:
     if serializer in state.initialized_serializers:
         return
     state.initialized_serializers.add(serializer)
+    _install_serializer_preload(serializer)
     serializer._insert_message(_messages.RunJavascriptMessage(_install_javascript()))
+
+
+def _install_serializer_preload(serializer: Any) -> None:
+    original_as_html = serializer.as_html
+
+    def as_html(*args: Any, **kwargs: Any) -> str:
+        html = original_as_html(*args, **kwargs)
+        head_start = html.index("<head>") + len("<head>")
+        return html[:head_start] + _preload_javascript() + html[head_start:]
+
+    serializer.as_html = as_html
 
 
 def _install_connected_clients(scene: Any, state: _RuntimeState) -> None:
@@ -428,6 +440,38 @@ def _install_javascript() -> str:
   window.BodyModelsViser = BodyModelsViser;
   window.BodyModelsViser.install({wasm!r});
 }})();
+"""
+
+
+def _preload_javascript() -> str:
+    return """
+<script>
+(() => {
+  const key = "__BODY_MODELS_VISER_PRELOAD__";
+  const pending = [];
+  const originalPush = Array.prototype.push;
+  const isBodyModelMessage = (message) =>
+    message !== null &&
+    typeof message === "object" &&
+    (message.type === "BodyModelsViserModelMessage" ||
+      message.type === "BodyModelsViserPoseMessage");
+  const push = function (...messages) {
+    const bodyModelMessages = messages.filter(isBodyModelMessage);
+    const viserMessages = messages.filter((message) => !isBodyModelMessage(message));
+    originalPush.apply(pending, bodyModelMessages);
+    return originalPush.apply(this, viserMessages);
+  };
+  Array.prototype.push = push;
+  window[key] = {
+    pending,
+    restore() {
+      if (Array.prototype.push === push) {
+        Array.prototype.push = originalPush;
+      }
+    },
+  };
+})();
+</script>
 """
 
 

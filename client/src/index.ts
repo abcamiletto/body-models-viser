@@ -44,7 +44,18 @@ type MeshMessage = {
 };
 
 type RemoveSceneNodeMessage = { type: "RemoveSceneNodeMessage"; name: string };
-type Message = ModelMessage | PoseMessage | MeshMessage | RemoveSceneNodeMessage | { type: string };
+type SetSceneNodeVisibilityMessage = {
+  type: "SetSceneNodeVisibilityMessage";
+  name: string;
+  visible: boolean;
+};
+type Message =
+  | ModelMessage
+  | PoseMessage
+  | MeshMessage
+  | RemoveSceneNodeMessage
+  | SetSceneNodeVisibilityMessage
+  | { type: string };
 
 type ViewerLike = {
   mutable: {
@@ -75,6 +86,7 @@ type WasmExports = {
 };
 
 type WasmBuffer = { ptr: number; len: number; byteLen: number };
+type PreloadState = { pending: Message[]; restore(): void };
 type MeshState = {
   lbsWeights: WasmBuffer;
   restVertices: WasmBuffer;
@@ -98,6 +110,7 @@ class BodyModelsViserRuntime {
     const instance = new WebAssembly.Instance(module);
     this.wasm = instance.exports as WasmExports;
     this.patchMessageQueue();
+    this.drainPreload();
     this.ready();
   }
 
@@ -181,11 +194,14 @@ class BodyModelsViserRuntime {
       mesh.outputVertices.ptr,
     );
     const vertices = this.copyOutput(mesh.outputVertices);
-    this.getViewer().mutable.current.messageQueue.push({
-      type: "MeshMessage",
-      name,
-      props: { ...mesh.props, vertices, faces: mesh.faces },
-    });
+    this.getViewer().mutable.current.messageQueue.push(
+      { type: "SetSceneNodeVisibilityMessage", name, visible: true },
+      {
+        type: "MeshMessage",
+        name,
+        props: { ...mesh.props, vertices, faces: mesh.faces },
+      },
+    );
   }
 
   private copyToWasm(array: Float32Array): WasmBuffer {
@@ -247,6 +263,16 @@ class BodyModelsViserRuntime {
       return push(...forwarded);
     };
   }
+
+  private drainPreload(): void {
+    const preload = getPreloadState();
+    if (preload === undefined) {
+      return;
+    }
+    const pending = preload.pending.splice(0);
+    preload.restore();
+    pending.forEach((message) => this.consume(message));
+  }
 }
 
 type ReactFiberNode = {
@@ -290,6 +316,11 @@ function isViewerLike(value: unknown): value is ViewerLike {
     value !== null &&
     Array.isArray((value as Partial<ViewerLike>).mutable?.current?.messageQueue)
   );
+}
+
+function getPreloadState(): PreloadState | undefined {
+  return (window as unknown as Record<string, PreloadState | undefined>)
+    .__BODY_MODELS_VISER_PRELOAD__;
 }
 
 const runtime = new BodyModelsViserRuntime();
