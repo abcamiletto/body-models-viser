@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "body-models-viser"
-version = "0.3.2"
+version = "0.3.3"
 description = "Browser-side body model evaluation for viser"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "body-models==0.14.0",
+  "body-models>=0.18.1",
   "jaxtyping",
   "nodeenv",
   "numpy",

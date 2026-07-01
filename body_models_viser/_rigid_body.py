@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from body_models.base import BodyModel
 from jaxtyping import Float
 from nanomanifold import SO3
 
@@ -16,7 +15,7 @@ class ViserRigidBodyModelHandle:
 
     def __init__(
         self,
-        model: BodyModel,
+        model: Any,
         pose: dict[str, Float[np.ndarray, "..."]],
         root_frame: viser.FrameHandle,
         links: list[viser.MeshHandle],
@@ -134,7 +133,7 @@ class ViserRigidBodyModelHandle:
 def add_rigid_body_model(
     scene: viser.SceneApi,
     name: str,
-    model: BodyModel,
+    model: Any,
     *,
     color: tuple[float, float, float] = (180, 180, 180),
 ) -> ViserRigidBodyModelHandle:
