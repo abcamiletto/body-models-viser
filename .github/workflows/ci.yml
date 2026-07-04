@@ -65,5 +65,7 @@ jobs:
           cd client
           npm ci
           npm run build
+      - name: Test Python
+        run: uv run pytest
       - name: Build Python package
         run: uv build

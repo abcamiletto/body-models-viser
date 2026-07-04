@@ -44,5 +44,6 @@ packages = ["body_models_viser"]
 
 [dependency-groups]
 dev = [
+    "pytest>=8",
     "wasmtime>=45.0.0",
 ]
