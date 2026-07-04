@@ -65,7 +65,7 @@ requires-dist = [
     { name = "jaxtyping" },
     { name = "nodeenv" },
     { name = "numpy" },
-    { name = "viser" },
+    { name = "viser", specifier = ">=1.0.29,<1.1" },
 ]
 
 [package.metadata.requires-dev]

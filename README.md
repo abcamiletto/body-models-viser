@@ -99,6 +99,14 @@ runtime payload containing skinning weights, rest vertices, skinning transforms,
 and pose offsets. Adding another body model should only require a Python
 preparation adapter when its `body-models` outputs need normalization.
 
+## viser compatibility
+
+This package patches viser private internals (message serializer, websock
+client state, and the client React tree) to inject its runtime. The supported
+viser range is pinned in `pyproject.toml`; when raising the ceiling, run
+`uv run pytest` and `uv run scripts/visualize_models.py` against the new
+version and check a browser actually renders.
+
 ## Development
 
 Build the Rust crate:
