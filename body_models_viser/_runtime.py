@@ -25,8 +25,7 @@ from ._client_autobuild import ensure_client_is_built
 @dataclasses.dataclass
 class BodyModelsViserModelMessage(_messages.Message, include_in_scene_serialization=True):
     name: str
-    vertex_count: int
-    lbs_weights: npt.NDArray[np.float32]
+    skin_weights: npt.NDArray[np.float32]
     faces: npt.NDArray[np.uint32]
     rest_vertices: npt.NDArray[np.float32]
     skinning_transforms: npt.NDArray[np.float32]

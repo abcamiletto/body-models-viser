@@ -13,8 +13,7 @@ type MeshProps = {
 type ModelMessage = {
   type: "BodyModelsViserModelMessage";
   name: string;
-  vertex_count: number;
-  lbs_weights: Float32Array;
+  skin_weights: Float32Array;
   faces: Uint32Array;
   rest_vertices: Float32Array;
   skinning_transforms: Float32Array;
@@ -71,8 +70,8 @@ type WasmExports = {
   alloc(size: number): number;
   wasm_free(ptr: number, len: number): void;
   forward_vertices(
-    lbsWeightsPtr: number,
-    lbsWeightsLen: number,
+    skinWeightsPtr: number,
+    skinWeightsLen: number,
     restVerticesPtr: number,
     restVerticesLen: number,
     skinningTransformsPtr: number,
@@ -88,7 +87,7 @@ type WasmExports = {
 type WasmBuffer = { ptr: number; len: number; byteLen: number };
 type PreloadState = { pending: Message[]; restore(): void };
 type MeshState = {
-  lbsWeights: WasmBuffer;
+  skinWeights: WasmBuffer;
   restVertices: WasmBuffer;
   skinningTransforms: WasmBuffer;
   poseOffsets: WasmBuffer;
@@ -139,13 +138,13 @@ class BodyModelsViserRuntime {
       this.freeMesh(existing);
     }
     const mesh = {
-      lbsWeights: this.copyToWasm(message.lbs_weights),
+      skinWeights: this.copyToWasm(message.skin_weights),
       restVertices: this.copyToWasm(message.rest_vertices),
       skinningTransforms: this.copyToWasm(message.skinning_transforms),
       poseOffsets: this.copyToWasm(message.pose_offsets),
       globalRotation: this.copyToWasm(message.global_rotation),
       globalTranslation: this.copyToWasm(message.global_translation),
-      outputVertices: this.allocF32(message.vertex_count * 3),
+      outputVertices: this.allocF32(message.rest_vertices.length),
       faces: message.faces,
       props: message.props,
     };
@@ -181,8 +180,8 @@ class BodyModelsViserRuntime {
   private pushMesh(name: string, mesh: MeshState): void {
     const wasm = this.requireWasm();
     wasm.forward_vertices(
-      mesh.lbsWeights.ptr,
-      mesh.lbsWeights.len,
+      mesh.skinWeights.ptr,
+      mesh.skinWeights.len,
       mesh.restVertices.ptr,
       mesh.restVertices.len,
       mesh.skinningTransforms.ptr,
@@ -229,7 +228,7 @@ class BodyModelsViserRuntime {
   }
 
   private freeMesh(mesh: MeshState): void {
-    this.freeBuffer(mesh.lbsWeights);
+    this.freeBuffer(mesh.skinWeights);
     this.freeBuffer(mesh.restVertices);
     this.freeBuffer(mesh.skinningTransforms);
     this.freeBuffer(mesh.poseOffsets);

@@ -1,6 +1,7 @@
 [package]
 name = "body-models-viser"
-version = "0.3.0"
+# Not published; the release version lives in pyproject.toml.
+version = "0.0.0"
 edition = "2024"
 
 [lib]

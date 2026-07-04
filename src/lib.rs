@@ -21,8 +21,8 @@ pub unsafe extern "C" fn wasm_free(ptr: *mut u8, len: usize) {
 ///
 /// All pointers must refer to valid contiguous buffers for the given lengths.
 pub unsafe extern "C" fn forward_vertices(
-    lbs_weights_ptr: *const f32,
-    lbs_weights_len: usize,
+    skin_weights_ptr: *const f32,
+    skin_weights_len: usize,
     rest_vertices_ptr: *const f32,
     rest_vertices_len: usize,
     skinning_transforms_ptr: *const f32,
@@ -37,13 +37,13 @@ pub unsafe extern "C" fn forward_vertices(
     assert_eq!(skinning_transforms_len % 16, 0);
     assert_eq!(pose_offsets_len, rest_vertices_len);
     assert_eq!(
-        lbs_weights_len,
+        skin_weights_len,
         (rest_vertices_len / 3) * (skinning_transforms_len / 16)
     );
 
     let vertex_count = rest_vertices_len / 3;
     let inputs = skin::ForwardInputs {
-        lbs_weights: unsafe { std::slice::from_raw_parts(lbs_weights_ptr, lbs_weights_len) },
+        skin_weights: unsafe { std::slice::from_raw_parts(skin_weights_ptr, skin_weights_len) },
         rest_vertices: unsafe { std::slice::from_raw_parts(rest_vertices_ptr, rest_vertices_len) },
         skinning_transforms: unsafe {
             std::slice::from_raw_parts(skinning_transforms_ptr, skinning_transforms_len)

@@ -10,8 +10,23 @@ if TYPE_CHECKING:
     import viser
 
 
+def _pose_property(key: str) -> property:
+    def get(self: ViserRigidBodyModelHandle) -> np.ndarray:
+        return self.pose[key]
+
+    def set(self: ViserRigidBodyModelHandle, value: np.ndarray) -> None:
+        self.set_pose(**{key: value})
+
+    return property(get, set)
+
+
 class ViserRigidBodyModelHandle:
     """Rigid articulated body model rendered as one static mesh per link."""
+
+    body_pose = _pose_property("body_pose")
+    hand_pose = _pose_property("hand_pose")
+    global_rotation = _pose_property("global_rotation")
+    global_translation = _pose_property("global_translation")
 
     def __init__(
         self,
@@ -36,9 +51,7 @@ class ViserRigidBodyModelHandle:
 
     @wxyz.setter
     def wxyz(self, value: tuple[float, float, float, float] | np.ndarray) -> None:
-        value = np.asarray(value)
-        assert value.shape == (4,)
-        self.root_frame.wxyz = value
+        self.root_frame.wxyz = np.asarray(value)
 
     @property
     def position(self) -> Float[np.ndarray, "3"]:
@@ -46,9 +59,7 @@ class ViserRigidBodyModelHandle:
 
     @position.setter
     def position(self, value: tuple[float, float, float] | np.ndarray) -> None:
-        value = np.asarray(value)
-        assert value.shape == (3,)
-        self.root_frame.position = value
+        self.root_frame.position = np.asarray(value)
 
     @property
     def visible(self) -> bool:
@@ -58,65 +69,16 @@ class ViserRigidBodyModelHandle:
     def visible(self, value: bool) -> None:
         self.root_frame.visible = value
 
-    @property
-    def body_pose(self) -> Float[np.ndarray, "..."]:
-        assert "body_pose" in self.pose, f"{self.model_name} does not support 'body_pose'."
-        return self.pose["body_pose"]
-
-    @body_pose.setter
-    def body_pose(self, value: Float[np.ndarray, "..."] | np.ndarray) -> None:
-        assert "body_pose" in self.pose, f"{self.model_name} does not support 'body_pose'."
-        self.pose["body_pose"] = np.asarray(value)
-        self._apply_pose()
-
-    @property
-    def hand_pose(self) -> Float[np.ndarray, "..."]:
-        assert "hand_pose" in self.pose, f"{self.model_name} does not support 'hand_pose'."
-        return self.pose["hand_pose"]
-
-    @hand_pose.setter
-    def hand_pose(self, value: Float[np.ndarray, "..."] | np.ndarray) -> None:
-        assert "hand_pose" in self.pose, f"{self.model_name} does not support 'hand_pose'."
-        self.pose["hand_pose"] = np.asarray(value)
-        self._apply_pose()
-
-    @property
-    def global_rotation(self) -> Float[np.ndarray, "..."]:
-        assert "global_rotation" in self.pose, f"{self.model_name} does not support 'global_rotation'."
-        return self.pose["global_rotation"]
-
-    @global_rotation.setter
-    def global_rotation(self, value: Float[np.ndarray, "..."] | np.ndarray) -> None:
-        assert "global_rotation" in self.pose, f"{self.model_name} does not support 'global_rotation'."
-        self.pose["global_rotation"] = np.asarray(value)
-        self._apply_pose()
-
-    @property
-    def global_translation(self) -> Float[np.ndarray, "..."]:
-        assert "global_translation" in self.pose, f"{self.model_name} does not support 'global_translation'."
-        return self.pose["global_translation"]
-
-    @global_translation.setter
-    def global_translation(self, value: Float[np.ndarray, "..."] | np.ndarray) -> None:
-        assert "global_translation" in self.pose, f"{self.model_name} does not support 'global_translation'."
-        self.pose["global_translation"] = np.asarray(value)
-        self._apply_pose()
-
     def set_pose(self, **forward_kwargs: Float[np.ndarray, "..."] | np.ndarray) -> None:
-        changed = False
+        invalid = forward_kwargs.keys() - self.pose.keys()
+        if invalid:
+            raise ValueError(f"{self.model_name} does not support: {', '.join(sorted(invalid))}.")
         for name, value in forward_kwargs.items():
-            assert name in self.pose, f"{self.model_name} does not support {name!r}."
-            value = np.asarray(value)
-            if np.array_equal(self.pose[name], value):
-                continue
-            self.pose[name] = value.copy()
-            changed = True
-        if not changed:
-            return
+            self.pose[name] = np.asarray(value).copy()
         self._apply_pose()
 
     def _apply_pose(self) -> None:
-        transforms = np.asarray(self.model.forward_links(**self.pose))  # type: ignore[attr-defined]
+        transforms = np.asarray(self.model.forward_links(**self.pose))
         rotations = transforms[:, :3, :3]
         wxyzs = SO3.conversions.from_rotmat_to_quat(rotations, convention="wxyz", xp=np)
         positions = transforms[:, :3, 3]
@@ -146,8 +108,8 @@ def add_rigid_body_model(
     root = scene.add_frame(name, show_axes=False)
 
     links = []
-    for index, link_name in enumerate(model.link_names):  # type: ignore[attr-defined]
-        mesh = model.link_mesh(link_name)  # type: ignore[attr-defined]
+    for index, link_name in enumerate(model.link_names):
+        mesh = model.link_mesh(link_name)
         link_path = f"{name}/links/{index:03d}"
         links.append(
             scene.add_mesh_simple(

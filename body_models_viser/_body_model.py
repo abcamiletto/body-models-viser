@@ -40,16 +40,16 @@ class BodyModelHandle:
         for key in cls.pose_keys:
             setattr(cls, key, _pose_property(key))
 
-    def __init__(self, scene: Any, name: str, model: Any, pose: Params) -> None:
+    def __init__(self, scene: Any, name: str, model: Any, params: Params) -> None:
         self.scene = scene
         self.name = name
         self.model = model
-        self.pose = pose
-        self.identity = self._prepare_identity()
+        self.params = params
+        self._prepared_identity = self._prepare_identity()
 
     @property
     def global_rotation(self) -> Float[np.ndarray, "3"]:
-        return self.pose["global_rotation"]
+        return self.params["global_rotation"]
 
     @global_rotation.setter
     def global_rotation(self, value: Float[np.ndarray, "3"]) -> None:
@@ -57,7 +57,7 @@ class BodyModelHandle:
 
     @property
     def global_translation(self) -> Float[np.ndarray, "3"]:
-        return self.pose["global_translation"]
+        return self.params["global_translation"]
 
     @global_translation.setter
     def global_translation(self, value: Float[np.ndarray, "3"]) -> None:
@@ -67,29 +67,29 @@ class BodyModelHandle:
         invalid = params.keys() - set(self.identity_keys)
         if invalid:
             raise ValueError(f"Invalid identity parameter(s): {', '.join(sorted(invalid))}.")
-        self._update_pose(params)
-        self.identity = self._prepare_identity()
+        self._update_params(params)
+        self._prepared_identity = self._prepare_identity()
         self._publish_pose()
 
     def set_pose(self, **params: np.ndarray) -> None:
         invalid = params.keys() - set(self.pose_keys)
         if invalid:
             raise ValueError(f"Invalid pose parameter(s): {', '.join(sorted(invalid))}.")
-        self._update_pose(params)
+        self._update_params(params)
         self._publish_pose()
 
     def set_transform(self, **params: np.ndarray) -> None:
         invalid = params.keys() - {"global_rotation", "global_translation"}
         if invalid:
             raise ValueError(f"Invalid transform parameter(s): {', '.join(sorted(invalid))}.")
-        self._update_pose(params)
+        self._update_params(params)
         message = BodyModelsViserPoseMessage(
             name=self.name,
             rest_vertices=None,
             skinning_transforms=None,
             pose_offsets=None,
-            global_rotation=np.ascontiguousarray(self.pose["global_rotation"], dtype="<f4"),
-            global_translation=np.ascontiguousarray(self.pose["global_translation"], dtype="<f4"),
+            global_rotation=np.ascontiguousarray(self.params["global_rotation"], dtype="<f4"),
+            global_translation=np.ascontiguousarray(self.params["global_translation"], dtype="<f4"),
         )
         state = _runtime.get_state(self.scene)
         # Send the slim message to live clients, but keep full skinning data in
@@ -110,35 +110,35 @@ class BodyModelHandle:
         _runtime.broadcast(self.scene, _messages.RemoveSceneNodeMessage(self.name))
 
     def _prepare_identity(self) -> Any:
-        return self.model.prepare_identity(**{key: self.pose[key] for key in self.identity_keys})
+        return self.model.prepare_identity(**{key: self.params[key] for key in self.identity_keys})
 
     def _prepare_pose(self) -> Any:
         return self.model.prepare_pose(
-            **{key: self.pose[key] for key in self.pose_keys}, identity=self.identity
+            **{key: self.params[key] for key in self.pose_keys}, identity=self._prepared_identity
         )
 
     def _publish_pose(self) -> None:
-        skinning, pose_offsets = _skinning_arrays(self.model, self.identity, self._prepare_pose())
+        skinning, pose_offsets = _skinning_arrays(self.model, self._prepared_identity, self._prepare_pose())
         message = BodyModelsViserPoseMessage(
             name=self.name,
             rest_vertices=np.ascontiguousarray(skinning["rest_vertices"], dtype="<f4"),
             skinning_transforms=np.ascontiguousarray(skinning["skinning_transforms"], dtype="<f4"),
             pose_offsets=np.ascontiguousarray(pose_offsets, dtype="<f4"),
-            global_rotation=np.ascontiguousarray(self.pose["global_rotation"], dtype="<f4"),
-            global_translation=np.ascontiguousarray(self.pose["global_translation"], dtype="<f4"),
+            global_rotation=np.ascontiguousarray(self.params["global_rotation"], dtype="<f4"),
+            global_translation=np.ascontiguousarray(self.params["global_translation"], dtype="<f4"),
         )
         state = _runtime.get_state(self.scene)
         state.poses[self.name] = message
         _runtime.broadcast(self.scene, message)
 
-    def _update_pose(self, params: dict[str, np.ndarray]) -> None:
+    def _update_params(self, params: dict[str, np.ndarray]) -> None:
         for key, value in params.items():
-            self.pose[key] = np.asarray(value, dtype=np.float32).copy()
+            self.params[key] = np.asarray(value, dtype=np.float32).copy()
 
 
 def _identity_property(key: str) -> property:
     def get(self: BodyModelHandle) -> np.ndarray:
-        return self.pose[key]
+        return self.params[key]
 
     def set(self: BodyModelHandle, value: np.ndarray) -> None:
         self.set_identity(**{key: value})
@@ -148,7 +148,7 @@ def _identity_property(key: str) -> property:
 
 def _pose_property(key: str) -> property:
     def get(self: BodyModelHandle) -> np.ndarray:
-        return self.pose[key]
+        return self.params[key]
 
     def set(self: BodyModelHandle, value: np.ndarray) -> None:
         self.set_pose(**{key: value})
@@ -164,9 +164,9 @@ class AnnyBodyHandle(BodyModelHandle):
         # ANNY.prepare_pose requires global_rotation; the browser applies the
         # global transform in WASM, so it must be zeroed here.
         return self.model.prepare_pose(
-            **{key: self.pose[key] for key in self.pose_keys},
-            global_rotation=np.zeros_like(self.pose["global_rotation"]),
-            identity=self.identity,
+            **{key: self.params[key] for key in self.pose_keys},
+            global_rotation=np.zeros_like(self.params["global_rotation"]),
+            identity=self._prepared_identity,
         )
 
 
@@ -183,12 +183,12 @@ class GarmentMeasurementsBodyHandle(BodyModelHandle):
         # GarmentMeasurements.prepare_pose takes a single packed pose array.
         pose = pack_pose(
             np,
-            self.pose["pelvis_rotation"],
-            self.pose["body_pose"],
-            self.pose["head_pose"],
-            self.pose["hand_pose"],
+            self.params["pelvis_rotation"],
+            self.params["body_pose"],
+            self.params["head_pose"],
+            self.params["hand_pose"],
         )
-        return self.model.prepare_pose(pose, identity=self.identity)
+        return self.model.prepare_pose(pose, identity=self._prepared_identity)
 
 
 class ManoBodyHandle(BodyModelHandle):
@@ -229,9 +229,9 @@ class SomaBodyHandle(BodyModelHandle):
         # SOMA.prepare_pose requires global_rotation; the browser applies the
         # global transform in WASM, so it must be zeroed here.
         return self.model.prepare_pose(
-            **{key: self.pose[key] for key in self.pose_keys},
-            global_rotation=np.zeros_like(self.pose["global_rotation"]),
-            identity=self.identity,
+            **{key: self.params[key] for key in self.pose_keys},
+            global_rotation=np.zeros_like(self.params["global_rotation"]),
+            identity=self._prepared_identity,
         )
 
 
@@ -269,9 +269,9 @@ def add_body_model(
         raise TypeError(f"Unsupported body model {type(model).__name__}.")
 
     rest_pose = model.get_rest_pose()
-    pose = {key: np.asarray(value, dtype=np.float32).copy() for key, value in rest_pose.items()}
-    handle = handle_type(scene, name, model, pose)
-    skinning, pose_offsets = _skinning_arrays(model, handle.identity, handle._prepare_pose())
+    params = {key: np.asarray(value, dtype=np.float32).copy() for key, value in rest_pose.items()}
+    handle = handle_type(scene, name, model, params)
+    skinning, pose_offsets = _skinning_arrays(model, handle._prepared_identity, handle._prepare_pose())
     props = {
         "color": color,
         "wireframe": wireframe,
@@ -285,14 +285,13 @@ def add_body_model(
     }
     message = BodyModelsViserModelMessage(
         name=name,
-        vertex_count=int(skinning["rest_vertices"].shape[0]),
-        lbs_weights=np.ascontiguousarray(skinning["skin_weights"], dtype="<f4"),
+        skin_weights=np.ascontiguousarray(skinning["skin_weights"], dtype="<f4"),
         faces=np.ascontiguousarray(skinning["faces"], dtype="<u4"),
         rest_vertices=np.ascontiguousarray(skinning["rest_vertices"], dtype="<f4"),
         skinning_transforms=np.ascontiguousarray(skinning["skinning_transforms"], dtype="<f4"),
         pose_offsets=np.ascontiguousarray(pose_offsets, dtype="<f4"),
-        global_rotation=np.ascontiguousarray(pose["global_rotation"], dtype="<f4"),
-        global_translation=np.ascontiguousarray(pose["global_translation"], dtype="<f4"),
+        global_rotation=np.ascontiguousarray(params["global_rotation"], dtype="<f4"),
+        global_translation=np.ascontiguousarray(params["global_translation"], dtype="<f4"),
         props=props,
     )
     state = _runtime.get_state(scene)

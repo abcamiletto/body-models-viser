@@ -16,11 +16,10 @@ def test_add_records_model_message(scene):
     handle = bmv.add_body_model(scene, "/stub", StubModel())
 
     assert isinstance(handle, StubHandle)
-    assert set(handle.pose) == {"shape", "body_pose", "global_rotation", "global_translation"}
-    assert all(value.dtype == np.float32 for value in handle.pose.values())
+    assert set(handle.params) == {"shape", "body_pose", "global_rotation", "global_translation"}
+    assert all(value.dtype == np.float32 for value in handle.params.values())
 
     message = state_of(scene).models["/stub"]
-    assert message.vertex_count == 2
     assert message.faces.dtype == np.uint32
     assert message.rest_vertices.dtype == np.dtype("<f4")
     np.testing.assert_array_equal(message.rest_vertices, [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
@@ -53,7 +52,7 @@ def test_set_identity_records_full_pose_message(scene):
 
     message = state_of(scene).poses["/stub"]
     assert message.rest_vertices is not None
-    np.testing.assert_array_equal(handle.pose["shape"], np.ones(3))
+    np.testing.assert_array_equal(handle.params["shape"], np.ones(3))
 
 
 def test_property_setters_route_to_updates(scene):
