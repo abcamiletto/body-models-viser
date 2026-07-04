@@ -86,6 +86,19 @@ def test_set_transform_before_any_pose_stores_slim_message(scene):
     np.testing.assert_array_equal(message.global_translation, [1.0, 2.0, 3.0])
 
 
+def test_set_transform_after_pose_keeps_skinning_data(scene):
+    handle = bmv.add_body_model(scene, "/stub", StubModel())
+    posed = np.arange(6, dtype=np.float32).reshape(2, 3)
+    handle.set_pose(body_pose=posed)
+
+    handle.set_transform(global_translation=np.array([1.0, 2.0, 3.0]))
+
+    message = state_of(scene).poses["/stub"]
+    assert message.rest_vertices is not None
+    np.testing.assert_array_equal(message.skinning_transforms[:, :3, 3], posed)
+    np.testing.assert_array_equal(message.global_translation, [1.0, 2.0, 3.0])
+
+
 def test_replay_pushes_model_then_pose(scene):
     handle = bmv.add_body_model(scene, "/stub", StubModel())
     handle.set_pose(body_pose=np.ones((2, 3), dtype=np.float32))

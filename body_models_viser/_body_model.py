@@ -140,7 +140,15 @@ class BodyModelHandle:
             global_translation=np.ascontiguousarray(self.pose["global_translation"], dtype="<f4"),
         )
         state = _runtime_state(self.scene)
-        state.poses[self.name] = message
+        # Send the slim message to live clients, but keep full skinning data in
+        # the stored message: it is the single source of truth replayed to late
+        # clients and new offline exports.
+        stored = state.poses.get(self.name)
+        state.poses[self.name] = message if stored is None else dataclasses.replace(
+            stored,
+            global_rotation=message.global_rotation,
+            global_translation=message.global_translation,
+        )
         _record_state_message(self.scene, state, message)
         _queue_ready_clients(self.scene, message)
 
