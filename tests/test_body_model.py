@@ -5,7 +5,7 @@ import pytest
 from conftest import FakeClientState, StubHandle, StubModel
 
 import body_models_viser as bmv
-import body_models_viser._body_model as bm
+from body_models_viser import _runtime
 
 
 def state_of(scene):
@@ -104,7 +104,7 @@ def test_replay_pushes_model_then_pose(scene):
     handle.set_pose(body_pose=np.ones((2, 3), dtype=np.float32))
 
     client_state = FakeClientState()
-    bm._replay_state(client_state, state_of(scene))
+    _runtime._replay_state(client_state, state_of(scene))
 
     types = [type(message).__name__ for message in client_state.message_buffer.messages]
     assert types == ["BodyModelsViserModelMessage", "BodyModelsViserPoseMessage"]
@@ -119,7 +119,7 @@ def test_remove_clears_state(scene):
     assert "/stub" not in state_of(scene).models
     assert "/stub" not in state_of(scene).poses
     client_state = FakeClientState()
-    bm._replay_state(client_state, state_of(scene))
+    _runtime._replay_state(client_state, state_of(scene))
     assert client_state.message_buffer.messages == []
     with pytest.raises(KeyError):
         handle.remove()
