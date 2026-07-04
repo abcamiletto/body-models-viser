@@ -40,8 +40,8 @@ class StubModel:
 
 
 class StubHandle(bm.BodyModelHandle):
-    shape = bm._identity_property("shape")
-    body_pose = bm._pose_property("body_pose")
+    identity_keys = ("shape",)
+    pose_keys = ("body_pose",)
 
 
 class FakeBuffer:
@@ -72,7 +72,7 @@ def server():
 
 @pytest.fixture
 def scene(server, monkeypatch):
-    monkeypatch.setattr(bm, "_HANDLE_TYPES", bm._HANDLE_TYPES + ((StubModel, StubHandle),))
+    monkeypatch.setattr(bm, "_HANDLE_TYPES", {**bm._HANDLE_TYPES, StubModel: StubHandle})
     yield server.scene
     state = getattr(server.scene._websock_interface, "_body_models_viser", None)
     if state is not None:
