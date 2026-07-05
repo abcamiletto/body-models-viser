@@ -23,15 +23,18 @@ ASSETS = (
 
 
 def ensure_client_is_built() -> None:
+    if not CLIENT_DIR.exists():
+        for asset in ASSETS:
+            if not asset.exists():
+                raise FileNotFoundError(
+                    f"Prebuilt client asset missing: {asset}. "
+                    "The package was built without client assets."
+                )
+        return
+
     inputs = [CLIENT_DIR / name for name in CLIENT_FILES]
     inputs.extend((ROOT / "Cargo.lock", ROOT / "Cargo.toml"))
     inputs.extend((ROOT / "src").glob("*.rs"))
-
-    if not CLIENT_DIR.exists():
-        for asset in ASSETS:
-            asset.stat()
-        return
-
     if all(path.exists() for path in ASSETS) and max(path.stat().st_mtime for path in inputs) < min(
         path.stat().st_mtime for path in ASSETS
     ):
@@ -44,10 +47,7 @@ def ensure_client_is_built() -> None:
 def _install_sandboxed_node() -> pathlib.Path:
     env_dir = CLIENT_DIR / ".nodeenv"
     node_bin_dir = env_dir / ("Scripts" if sys.platform == "win32" else "bin")
-    npm_path = node_bin_dir / "npm"
-    if sys.platform == "win32":
-        npm_path = npm_path.with_suffix(".cmd")
-    if npm_path.exists():
+    if _npm_path(node_bin_dir).exists():
         return node_bin_dir
     if env_dir.exists():
         shutil.rmtree(env_dir)
@@ -57,13 +57,17 @@ def _install_sandboxed_node() -> pathlib.Path:
 
 
 def _build_client(node_bin_dir: pathlib.Path) -> None:
-    npm_path = node_bin_dir / "npm"
-    if sys.platform == "win32":
-        npm_path = npm_path.with_suffix(".cmd")
-
+    npm = str(_npm_path(node_bin_dir))
     env = os.environ.copy()
     env["NODE_VIRTUAL_ENV"] = str(node_bin_dir.parent)
     env["PATH"] = str(node_bin_dir) + os.pathsep + env["PATH"]
 
-    subprocess.run([str(npm_path), "ci"], cwd=CLIENT_DIR, env=env, check=True)
-    subprocess.run([str(npm_path), "run", "build"], cwd=CLIENT_DIR, env=env, check=True)
+    subprocess.run([npm, "ci"], cwd=CLIENT_DIR, env=env, check=True)
+    subprocess.run([npm, "run", "build"], cwd=CLIENT_DIR, env=env, check=True)
+
+
+def _npm_path(node_bin_dir: pathlib.Path) -> pathlib.Path:
+    npm_path = node_bin_dir / "npm"
+    if sys.platform == "win32":
+        npm_path = npm_path.with_suffix(".cmd")
+    return npm_path

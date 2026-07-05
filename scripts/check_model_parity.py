@@ -15,7 +15,7 @@ from body_models.smpl.numpy import SMPL
 from body_models.smplh.numpy import SMPLH
 from body_models.smplx.numpy import SMPLX
 from body_models.soma.numpy import SOMA
-from body_models_viser._body_model import _prepare_identity, _prepare_pose
+from body_models_viser._body_model import _HANDLE_TYPES
 
 
 def main() -> None:
@@ -35,13 +35,13 @@ def main() -> None:
         params = {key: np.asarray(value, dtype=np.float32).copy() for key, value in rest_pose.items()}
         params["global_rotation"] = np.array([0.2, -0.1, 0.15], dtype=np.float32)
         params["global_translation"] = np.array([0.1, -0.2, 0.3], dtype=np.float32)
-        identity = _prepare_identity(model, params)
-        pose = _prepare_pose(model, params, identity)
-        skinning = model.prepare_skinning(identity=identity, pose=pose)
+        handle = _HANDLE_TYPES[type(model)](scene=None, name=name, model=model, params=params)
+        identity = handle._prepared_identity
+        skinning = model.prepare_skinning(identity=identity, pose=handle._prepare_pose())
         pose_offsets_array = skinning["pose_offsets"] if "pose_offsets" in skinning else np.zeros_like(skinning["rest_vertices"])
         expected = model.forward_vertices(**params, identity=identity)
 
-        lbs_weights = write_f32(store, memory, alloc, skinning["skin_weights"])
+        skin_weights = write_f32(store, memory, alloc, skinning["skin_weights"])
         rest_vertices = write_f32(store, memory, alloc, skinning["rest_vertices"])
         skinning_transforms = write_f32(store, memory, alloc, skinning["skinning_transforms"])
         pose_offsets = write_f32(store, memory, alloc, pose_offsets_array)
@@ -51,7 +51,7 @@ def main() -> None:
 
         forward(
             store,
-            lbs_weights,
+            skin_weights,
             skinning["skin_weights"].size,
             rest_vertices,
             skinning["rest_vertices"].size,

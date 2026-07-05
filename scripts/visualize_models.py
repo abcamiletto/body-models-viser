@@ -63,7 +63,7 @@ def add_slider(
 
     @gui.on_update
     def _(_) -> None:
-        params = np.asarray(handle.pose[key], dtype=np.float32).copy()
+        params = np.asarray(handle.params[key], dtype=np.float32).copy()
         params[index] = gui.value
         handle.set_pose(**{key: params})
 

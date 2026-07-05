@@ -13,7 +13,7 @@ dependencies = [
   "jaxtyping",
   "nodeenv",
   "numpy",
-  "viser",
+  "viser>=1.0.29,<1.1",
 ]
 
 [tool.hatch.build]
@@ -44,5 +44,6 @@ packages = ["body_models_viser"]
 
 [dependency-groups]
 dev = [
+    "pytest>=8",
     "wasmtime>=45.0.0",
 ]

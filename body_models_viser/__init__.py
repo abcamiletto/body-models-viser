@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib.metadata import version
+
 from ._rigid_body import ViserRigidBodyModelHandle, add_rigid_body_model
 from ._skeleton import ViserSkeletonHandle, add_skeleton
 from ._body_model import (
@@ -17,7 +19,7 @@ from ._body_model import (
     add_body_model,
 )
 
-__version__ = "0.3.3"
+__version__ = version("body-models-viser")
 
 __all__ = [
     "AnnyBodyHandle",
