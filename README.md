@@ -65,18 +65,21 @@ handle.joint_positions = joint_positions
 
 ### Rigid Body Models
 
-Use `add_rigid_body_model()` for rigid articulated models that expose
-`link_names`, `link_mesh(link_name)`, and `forward_links(...)`.
+Use `add_rigid_body_model()` for any `body_models.RigidBodyModel`, such as G1,
+BrainCo, SmplHumanoid, and MyoFullBody.
 
 ```python
 import body_models_viser as bmv
+from body_models import create_model
 
+model = create_model("g1")
 handle = bmv.add_rigid_body_model(server.scene, "/robot", model)
 handle.set_pose(body_pose=handle.pose["body_pose"])
 ```
 
-The rigid-body helper renders one static mesh per link, then updates link
-transforms when the pose changes.
+The rigid-body helper bakes one static link-local mesh per link from the rest
+pose (`forward_meshes()` sliced with the model's link metadata), then only
+updates link transforms from `forward_links()` when the pose changes.
 
 ## Runtime
 

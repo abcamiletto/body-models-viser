@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
+from body_models import RigidBodyModel
 from jaxtyping import Float
 from nanomanifold import SO3
 
@@ -30,7 +31,7 @@ class ViserRigidBodyModelHandle:
 
     def __init__(
         self,
-        model: Any,
+        model: RigidBodyModel,
         pose: dict[str, Float[np.ndarray, "..."]],
         root_frame: viser.FrameHandle,
         links: list[viser.MeshHandle],
@@ -95,27 +96,38 @@ class ViserRigidBodyModelHandle:
 def add_rigid_body_model(
     scene: viser.SceneApi,
     name: str,
-    model: Any,
+    model: RigidBodyModel,
     *,
     color: tuple[float, float, float] = (180, 180, 180),
 ) -> ViserRigidBodyModelHandle:
     """Add a rigid articulated body model to a ``viser`` scene."""
-    if not model.is_rigid_body:
+    if not isinstance(model, RigidBodyModel):
         model_name = model.__class__.__name__
-        raise ValueError(f"add_rigid_body_model() only supports rigid models, got {model_name}.")
+        raise TypeError(f"add_rigid_body_model() expects a body_models.RigidBodyModel, got {model_name}.")
 
     pose = model.get_rest_pose()
+    rest_links = np.asarray(model.forward_links(**pose))
+    rest_mesh = model.forward_meshes(**pose)[0]
     root = scene.add_frame(name, show_axes=False)
 
     links = []
-    for index, link_name in enumerate(model.link_names):
-        mesh = model.link_mesh(link_name)
-        link_path = f"{name}/links/{index:03d}"
+    for index in range(len(model.link_names)):
+        vertex_start = model.link_vertex_starts[index]
+        vertex_count = model.link_vertex_counts[index]
+        face_start = model.link_face_starts[index]
+        face_count = model.link_face_counts[index]
+        world_vertices = rest_mesh.vertices[vertex_start : vertex_start + vertex_count]
+        faces = rest_mesh.faces[face_start : face_start + face_count] - vertex_start
+        # Bake each link mesh into its link frame so pose updates only move the
+        # scene node: local = R^T (world - t) for the rest link transform.
+        rotation = rest_links[index, :3, :3]
+        translation = rest_links[index, :3, 3]
+        local_vertices = (world_vertices - translation) @ rotation
         links.append(
             scene.add_mesh_simple(
-                link_path,
-                vertices=np.asarray(mesh["vertices"], dtype=np.float32),
-                faces=np.asarray(mesh["faces"]),
+                f"{name}/links/{index:03d}",
+                vertices=local_vertices.astype(np.float32),
+                faces=faces,
                 color=color,
             )
         )
