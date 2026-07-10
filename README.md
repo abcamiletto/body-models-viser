@@ -35,9 +35,9 @@ shape[0] = 1.0
 handle.set_identity(shape=shape)
 ```
 
-`add_body_model()` returns a model-specific handle with `set_identity(...)`,
+`add_body_model()` returns a generic handle with `set_identity(...)`,
 `set_pose(...)`, `set_transform(...)`, `remove()`, `global_rotation`,
-`global_translation`, and the pose properties supported by that model.
+`global_translation`, and the parameter properties declared by the model.
 
 ### Skeletons
 
@@ -97,10 +97,10 @@ updates only global transform buffers. TypeScript copies changed buffers into
 persistent WASM memory, calls the Rust `forward_vertices()` kernel, and forwards
 the resulting vertex buffer to viser as a regular mesh message.
 
-The browser protocol is model-agnostic: Python adapts each model to a shared
-runtime payload containing skinning weights, rest vertices, skinning transforms,
-and pose offsets. Adding another body model should only require a Python
-preparation adapter when its `body-models` outputs need normalization.
+The browser protocol is model-agnostic: Python converts every `SkinnedModel` to
+a shared runtime payload containing skinning weights, rest vertices, skinning
+transforms, and pose offsets. Models that implement the standard preparation API
+and parameter-key metadata require no viser-specific adapter.
 
 ## viser compatibility
 

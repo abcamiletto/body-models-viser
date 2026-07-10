@@ -15,7 +15,7 @@ from body_models.smpl.numpy import SMPL
 from body_models.smplh.numpy import SMPLH
 from body_models.smplx.numpy import SMPLX
 from body_models.soma.numpy import SOMA
-from body_models_viser._body_model import _HANDLE_TYPES
+from body_models_viser import BodyModelHandle
 
 
 def main() -> None:
@@ -35,7 +35,7 @@ def main() -> None:
         params = {key: np.asarray(value, dtype=np.float32).copy() for key, value in rest_pose.items()}
         params["global_rotation"] = np.array([0.2, -0.1, 0.15], dtype=np.float32)
         params["global_translation"] = np.array([0.1, -0.2, 0.3], dtype=np.float32)
-        handle = _HANDLE_TYPES[type(model)](scene=None, name=name, model=model, params=params)
+        handle = BodyModelHandle(scene=None, name=name, model=model, params=params)
         identity = handle._prepared_identity
         skinning = model.prepare_skinning(identity=identity, pose=handle._prepare_pose())
         pose_offsets_array = skinning["pose_offsets"] if "pose_offsets" in skinning else np.zeros_like(skinning["rest_vertices"])

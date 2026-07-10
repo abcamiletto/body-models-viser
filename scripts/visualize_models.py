@@ -38,7 +38,7 @@ def main() -> None:
         time.sleep(1.0 / 30.0)
 
 
-def add_controls(server: viser.ViserServer, handle: bmv.SmplBodyHandle) -> None:
+def add_controls(server: viser.ViserServer, handle: bmv.BodyModelHandle) -> None:
     with server.gui.add_folder("SMPL", expand_by_default=True):
         with server.gui.add_folder("Shape"):
             for i in range(10):
@@ -51,7 +51,7 @@ def add_controls(server: viser.ViserServer, handle: bmv.SmplBodyHandle) -> None:
 
 def add_slider(
     server: viser.ViserServer,
-    handle: bmv.SmplBodyHandle,
+    handle: bmv.BodyModelHandle,
     label: str,
     key: str,
     index: tuple[int, ...],

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from conftest import FakeClientState, StubHandle, StubModel
+from conftest import FakeClientState, StubModel
 
 import body_models_viser as bmv
 from body_models_viser import _runtime
@@ -15,7 +15,7 @@ def state_of(scene):
 def test_add_records_model_message(scene):
     handle = bmv.add_body_model(scene, "/stub", StubModel())
 
-    assert isinstance(handle, StubHandle)
+    assert isinstance(handle, bmv.BodyModelHandle)
     assert set(handle.params) == {"shape", "body_pose", "global_rotation", "global_translation"}
     assert all(value.dtype == np.float32 for value in handle.params.values())
 
