@@ -1,20 +1,10 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any, ClassVar
+from typing import Any
 
+import body_models
 import numpy as np
-from body_models.anny.numpy import ANNY
-from body_models.flame.numpy import FLAME
-from body_models.garment_measurements.numpy import GarmentMeasurements
-from body_models.garment_measurements.pose import pack_pose
-from body_models.mano.numpy import MANO
-from body_models.mhr.numpy import MHR
-from body_models.skel.numpy import SKEL
-from body_models.smpl.numpy import SMPL
-from body_models.smplh.numpy import SMPLH
-from body_models.smplx.numpy import SMPLX
-from body_models.soma.numpy import SOMA
 from jaxtyping import Float
 from viser import _messages
 
@@ -25,46 +15,37 @@ Params = dict[str, Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]]
 
 
 class BodyModelHandle:
-    """Viser handle for one skinned body model.
+    """Viser handle for one skinned body model."""
 
-    Subclasses declare which rest-pose keys are identity parameters and which
-    are pose parameters; matching properties are generated automatically.
-    """
-
-    identity_keys: ClassVar[tuple[str, ...]] = ()
-    pose_keys: ClassVar[tuple[str, ...]] = ()
-
-    def __init_subclass__(cls) -> None:
-        for key in cls.identity_keys:
-            setattr(cls, key, _identity_property(key))
-        for key in cls.pose_keys:
-            setattr(cls, key, _pose_property(key))
-
-    def __init__(self, scene: Any, name: str, model: Any, params: Params) -> None:
+    def __init__(self, scene: Any, name: str, model: body_models.SkinnedModel, params: Params) -> None:
         self.scene = scene
         self.name = name
         self.model = model
         self.params = params
         self._prepared_identity = self._prepare_identity()
 
-    @property
-    def global_rotation(self) -> Float[np.ndarray, "3"]:
-        return self.params["global_rotation"]
+    def __getattr__(self, key: str) -> np.ndarray:
+        params = self.__dict__.get("params")
+        if params is not None and key in params:
+            return params[key]
+        raise AttributeError(key)
 
-    @global_rotation.setter
-    def global_rotation(self, value: Float[np.ndarray, "3"]) -> None:
-        self.set_transform(global_rotation=value)
-
-    @property
-    def global_translation(self) -> Float[np.ndarray, "3"]:
-        return self.params["global_translation"]
-
-    @global_translation.setter
-    def global_translation(self, value: Float[np.ndarray, "3"]) -> None:
-        self.set_transform(global_translation=value)
+    def __setattr__(self, key: str, value: Any) -> None:
+        model = self.__dict__.get("model")
+        if model is not None:
+            if key in model.identity_keys:
+                self.set_identity(**{key: value})
+                return
+            if key in model.pose_keys:
+                self.set_pose(**{key: value})
+                return
+            if key in model.transform_keys:
+                self.set_transform(**{key: value})
+                return
+        super().__setattr__(key, value)
 
     def set_identity(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - set(self.identity_keys)
+        invalid = params.keys() - set(self.model.identity_keys)
         if invalid:
             raise ValueError(f"Invalid identity parameter(s): {', '.join(sorted(invalid))}.")
         self._update_params(params)
@@ -72,14 +53,14 @@ class BodyModelHandle:
         self._publish_pose()
 
     def set_pose(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - set(self.pose_keys)
+        invalid = params.keys() - set(self.model.pose_keys)
         if invalid:
             raise ValueError(f"Invalid pose parameter(s): {', '.join(sorted(invalid))}.")
         self._update_params(params)
         self._publish_pose()
 
     def set_transform(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - {"global_rotation", "global_translation"}
+        invalid = params.keys() - set(self.model.transform_keys)
         if invalid:
             raise ValueError(f"Invalid transform parameter(s): {', '.join(sorted(invalid))}.")
         self._update_params(params)
@@ -110,12 +91,12 @@ class BodyModelHandle:
         _runtime.broadcast(self.scene, _messages.RemoveSceneNodeMessage(self.name))
 
     def _prepare_identity(self) -> Any:
-        return self.model.prepare_identity(**{key: self.params[key] for key in self.identity_keys})
+        identity_params = {key: self.params[key] for key in self.model.identity_keys}
+        return self.model.prepare_identity(**identity_params)
 
     def _prepare_pose(self) -> Any:
-        return self.model.prepare_pose(
-            **{key: self.params[key] for key in self.pose_keys}, identity=self._prepared_identity
-        )
+        pose_params = {key: self.params[key] for key in self.model.pose_keys}
+        return self.model.prepare_pose(**pose_params, identity=self._prepared_identity)
 
     def _publish_pose(self) -> None:
         skinning, pose_offsets = _skinning_arrays(self.model, self._prepared_identity, self._prepare_pose())
@@ -136,123 +117,10 @@ class BodyModelHandle:
             self.params[key] = np.asarray(value, dtype=np.float32).copy()
 
 
-def _identity_property(key: str) -> property:
-    def get(self: BodyModelHandle) -> np.ndarray:
-        return self.params[key]
-
-    def set(self: BodyModelHandle, value: np.ndarray) -> None:
-        self.set_identity(**{key: value})
-
-    return property(get, set)
-
-
-def _pose_property(key: str) -> property:
-    def get(self: BodyModelHandle) -> np.ndarray:
-        return self.params[key]
-
-    def set(self: BodyModelHandle, value: np.ndarray) -> None:
-        self.set_pose(**{key: value})
-
-    return property(get, set)
-
-
-class AnnyBodyHandle(BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose", "head_pose", "hand_pose")
-
-    def _prepare_pose(self) -> Any:
-        # ANNY.prepare_pose requires global_rotation; the browser applies the
-        # global transform in WASM, so it must be zeroed here.
-        return self.model.prepare_pose(
-            **{key: self.params[key] for key in self.pose_keys},
-            global_rotation=np.zeros_like(self.params["global_rotation"]),
-            identity=self._prepared_identity,
-        )
-
-
-class FlameBodyHandle(BodyModelHandle):
-    identity_keys = ("shape", "expression")
-    pose_keys = ("head_pose", "head_rotation")
-
-
-class GarmentMeasurementsBodyHandle(BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose", "head_pose", "hand_pose", "pelvis_rotation")
-
-    def _prepare_pose(self) -> Any:
-        # GarmentMeasurements.prepare_pose takes a single packed pose array.
-        pose = pack_pose(
-            np,
-            self.params["pelvis_rotation"],
-            self.params["body_pose"],
-            self.params["head_pose"],
-            self.params["hand_pose"],
-        )
-        return self.model.prepare_pose(pose, identity=self._prepared_identity)
-
-
-class ManoBodyHandle(BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("hand_pose", "wrist_rotation")
-
-
-class MhrBodyHandle(BodyModelHandle):
-    identity_keys = ("shape", "expression")
-    pose_keys = ("body_pose", "head_pose", "hand_pose")
-
-
-class SkelBodyHandle(BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose", "head_pose")
-
-
-class SmplBodyHandle(BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose", "pelvis_rotation")
-
-
-class SmplhBodyHandle(BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose", "hand_pose", "pelvis_rotation")
-
-
-class SmplxBodyHandle(BodyModelHandle):
-    identity_keys = ("shape", "expression")
-    pose_keys = ("body_pose", "hand_pose", "head_pose", "pelvis_rotation")
-
-
-class SomaBodyHandle(BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose", "head_pose", "hand_pose")
-
-    def _prepare_pose(self) -> Any:
-        # SOMA.prepare_pose requires global_rotation; the browser applies the
-        # global transform in WASM, so it must be zeroed here.
-        return self.model.prepare_pose(
-            **{key: self.params[key] for key in self.pose_keys},
-            global_rotation=np.zeros_like(self.params["global_rotation"]),
-            identity=self._prepared_identity,
-        )
-
-
-_HANDLE_TYPES: dict[type, type[BodyModelHandle]] = {
-    ANNY: AnnyBodyHandle,
-    FLAME: FlameBodyHandle,
-    GarmentMeasurements: GarmentMeasurementsBodyHandle,
-    MANO: ManoBodyHandle,
-    MHR: MhrBodyHandle,
-    SKEL: SkelBodyHandle,
-    SMPL: SmplBodyHandle,
-    SMPLH: SmplhBodyHandle,
-    SMPLX: SmplxBodyHandle,
-    SOMA: SomaBodyHandle,
-}
-
-
 def add_body_model(
     scene: Any,
     name: str,
-    model: Any,
+    model: body_models.SkinnedModel,
     *,
     color: tuple[int, int, int] = (180, 180, 180),
     wireframe: bool = False,
@@ -264,13 +132,12 @@ def add_body_model(
     cast_shadow: bool = True,
     receive_shadow: bool | float = True,
 ) -> BodyModelHandle:
-    handle_type = _HANDLE_TYPES.get(type(model))
-    if handle_type is None:
-        raise TypeError(f"Unsupported body model {type(model).__name__}.")
+    if not isinstance(model, body_models.SkinnedModel):
+        raise TypeError(f"Expected body_models.SkinnedModel, got {type(model).__name__}.")
 
     rest_pose = model.get_rest_pose()
     params = {key: np.asarray(value, dtype=np.float32).copy() for key, value in rest_pose.items()}
-    handle = handle_type(scene, name, model, params)
+    handle = BodyModelHandle(scene, name, model, params)
     skinning, pose_offsets = _skinning_arrays(model, handle._prepared_identity, handle._prepare_pose())
     props = {
         "color": color,

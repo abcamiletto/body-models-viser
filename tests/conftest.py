@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import socket
 
+import body_models
 import numpy as np
 import pytest
 import viser
 
-import body_models_viser._body_model as bm
-
 
 class StubModel:
     """Minimal body-models-protocol model: 2 vertices, 2 joints."""
+
+    identity_keys = ("shape",)
+    pose_keys = ("body_pose",)
+    transform_keys = ("global_translation", "global_rotation")
 
     def get_rest_pose(self):
         return {
@@ -39,9 +42,7 @@ class StubModel:
         }
 
 
-class StubHandle(bm.BodyModelHandle):
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose",)
+body_models.SkinnedModel.register(StubModel)
 
 
 class FakeBuffer:
@@ -71,8 +72,7 @@ def server():
 
 
 @pytest.fixture
-def scene(server, monkeypatch):
-    monkeypatch.setattr(bm, "_HANDLE_TYPES", {**bm._HANDLE_TYPES, StubModel: StubHandle})
+def scene(server):
     yield server.scene
     state = getattr(server.scene._websock_interface, "_body_models_viser", None)
     if state is not None:
