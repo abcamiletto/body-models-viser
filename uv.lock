@@ -57,13 +57,14 @@ wheels = [
 
 [[package]]
 name = "body-models-viser"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "." }
 dependencies = [
     { name = "body-models" },
     { name = "jaxtyping" },
     { name = "nodeenv" },
     { name = "numpy" },
+    { name = "trimesh" },
     { name = "viser" },
 ]
 
@@ -79,6 +80,7 @@ requires-dist = [
     { name = "jaxtyping" },
     { name = "nodeenv" },
     { name = "numpy" },
+    { name = "trimesh" },
     { name = "viser", specifier = ">=1.0.29,<1.1" },
 ]
 

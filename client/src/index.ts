@@ -187,6 +187,7 @@ type MeshState = {
   globalTranslationValues: Float32Array;
   props: MeshProps;
   restVersion: number;
+  visibilitySent: boolean;
 };
 
 const CORRECTIVE_SHADER = /* wgsl */ `
@@ -363,8 +364,8 @@ class BodyModelsViserRuntime {
       weightOffsets: this.copyToWasm(message.skin_weight_offsets),
       weightIndices: this.copyToWasm(message.skin_weight_indices),
       weightValues: this.copyToWasm(message.skin_weight_values),
-      correctiveBasis: hasCorrectives ? this.copyToWasm(message.corrective_basis!) : null,
-      correctiveScales: hasCorrectives ? this.copyToWasm(message.corrective_scales!) : null,
+      correctiveBasis: null,
+      correctiveScales: null,
       correctiveBasisValues: message.corrective_basis,
       correctiveScaleValues: message.corrective_scales,
       weightOffsetValues: message.skin_weight_offsets,
@@ -419,6 +420,7 @@ class BodyModelsViserRuntime {
       globalTranslationValues: message.global_translation.slice(),
       props: message.props,
       restVersion: 0,
+      visibilitySent: false,
     };
     asset.meshes.add(mesh);
     this.meshes.set(message.name, mesh);
@@ -562,6 +564,8 @@ class BodyModelsViserRuntime {
     const wasm = this.requireWasm();
     if (mesh.poseCoefficients !== null) {
       const asset = mesh.asset;
+      asset.correctiveBasis ??= this.copyToWasm(asset.correctiveBasisValues!);
+      asset.correctiveScales ??= this.copyToWasm(asset.correctiveScaleValues!);
       wasm.compute_pose_offsets(
         asset.correctiveBasis!.ptr,
         asset.correctiveBasis!.len,
@@ -646,7 +650,7 @@ class BodyModelsViserRuntime {
         continue;
       }
       const start = index * coordinateCount;
-      this.pushMesh(mesh, output.slice(start, start + coordinateCount));
+      this.pushMesh(mesh, output.subarray(start, start + coordinateCount));
     }
   }
 
@@ -820,14 +824,16 @@ class BodyModelsViserRuntime {
 
   private pushMesh(mesh: MeshState, vertices: Float32Array): void {
     this.modelRenders.push(performance.now());
-    this.getViewer().mutable.current.messageQueue.push(
-      { type: "SetSceneNodeVisibilityMessage", name: mesh.name, visible: true },
-      {
-        type: "MeshMessage",
-        name: mesh.name,
-        props: { ...mesh.props, vertices, faces: mesh.asset.faces },
-      },
-    );
+    const queue = this.getViewer().mutable.current.messageQueue;
+    if (!mesh.visibilitySent) {
+      queue.push({ type: "SetSceneNodeVisibilityMessage", name: mesh.name, visible: true });
+      mesh.visibilitySent = true;
+    }
+    queue.push({
+      type: "MeshMessage",
+      name: mesh.name,
+      props: { ...mesh.props, vertices, faces: mesh.asset.faces },
+    });
   }
 
   private remove(message: RemoveSceneNodeMessage): void {
