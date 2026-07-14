@@ -26,18 +26,22 @@ class StubModel:
     def prepare_identity(self, shape):
         return {"shape": np.asarray(shape)}
 
-    def prepare_pose(self, body_pose, *, identity):
-        return {"body_pose": np.asarray(body_pose)}
+    def prepare_pose(self, body_pose, *, identity, skip_vertices=False):
+        transforms = np.stack([np.eye(4, dtype=np.float32)] * 2)
+        transforms[:, :3, 3] = body_pose
+        return {
+            "body_pose": np.asarray(body_pose),
+            "skeleton_transforms": transforms,
+            "skinning_transforms": transforms,
+        }
 
     def prepare_skinning(self, *, identity, pose):
         # Encode the pose into the joint translations so tests can observe it.
-        transforms = np.stack([np.eye(4, dtype=np.float32)] * 2)
-        transforms[:, :3, 3] = pose["body_pose"]
         return {
             "skin_weights": np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
             "faces": np.array([[0, 1, 0]], dtype=np.uint32),
             "rest_vertices": np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32),
-            "skinning_transforms": transforms,
+            "skinning_transforms": pose["skinning_transforms"],
             # No "pose_offsets" key: exercises the zeros default.
         }
 
@@ -77,4 +81,4 @@ def scene(server):
     state = getattr(server.scene._websock_interface, "_body_models_viser", None)
     if state is not None:
         state.models.clear()
-        state.poses.clear()
+        state.assets.clear()

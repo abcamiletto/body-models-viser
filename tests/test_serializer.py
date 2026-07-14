@@ -22,8 +22,8 @@ def test_serializer_replays_runtime_then_state(scene):
 
     types = [payload["type"] for _, payload in serializer._messages]
     assert types[0] == "RunJavascriptMessage"
+    assert "BodyModelsViserAssetMessage" in types
     assert "BodyModelsViserModelMessage" in types
-    assert "BodyModelsViserPoseMessage" in types
 
     html = serializer.as_html()
     head = html.split("</head>")[0]

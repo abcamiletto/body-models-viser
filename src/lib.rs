@@ -20,9 +20,36 @@ pub unsafe extern "C" fn wasm_free(ptr: *mut u8, len: usize) {
 /// # Safety
 ///
 /// All pointers must refer to valid contiguous buffers for the given lengths.
-pub unsafe extern "C" fn forward_vertices(
-    skin_weights_ptr: *const f32,
-    skin_weights_len: usize,
+pub unsafe extern "C" fn compute_pose_offsets(
+    basis_ptr: *const i16,
+    basis_len: usize,
+    scales_ptr: *const f32,
+    scales_len: usize,
+    coefficients_ptr: *const f32,
+    coefficients_len: usize,
+    output_ptr: *mut f32,
+    output_len: usize,
+) {
+    assert_eq!(scales_len, output_len);
+    assert_eq!(basis_len, output_len * coefficients_len);
+    let basis = unsafe { std::slice::from_raw_parts(basis_ptr, basis_len) };
+    let scales = unsafe { std::slice::from_raw_parts(scales_ptr, scales_len) };
+    let coefficients = unsafe { std::slice::from_raw_parts(coefficients_ptr, coefficients_len) };
+    let output = unsafe { std::slice::from_raw_parts_mut(output_ptr, output_len) };
+    skin::compute_pose_offsets(basis, scales, coefficients, output);
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// All pointers must refer to valid contiguous buffers for the given lengths.
+pub unsafe extern "C" fn forward_vertices_sparse(
+    weight_offsets_ptr: *const u32,
+    weight_offsets_len: usize,
+    weight_indices_ptr: *const u16,
+    weight_indices_len: usize,
+    weight_values_ptr: *const f32,
+    weight_values_len: usize,
     rest_vertices_ptr: *const f32,
     rest_vertices_len: usize,
     skinning_transforms_ptr: *const f32,
@@ -36,14 +63,18 @@ pub unsafe extern "C" fn forward_vertices(
     assert_eq!(rest_vertices_len % 3, 0);
     assert_eq!(skinning_transforms_len % 16, 0);
     assert_eq!(pose_offsets_len, rest_vertices_len);
-    assert_eq!(
-        skin_weights_len,
-        (rest_vertices_len / 3) * (skinning_transforms_len / 16)
-    );
+    assert_eq!(weight_offsets_len, rest_vertices_len / 3 + 1);
+    assert_eq!(weight_indices_len, weight_values_len);
 
     let vertex_count = rest_vertices_len / 3;
     let inputs = skin::ForwardInputs {
-        skin_weights: unsafe { std::slice::from_raw_parts(skin_weights_ptr, skin_weights_len) },
+        weight_offsets: unsafe {
+            std::slice::from_raw_parts(weight_offsets_ptr, weight_offsets_len)
+        },
+        weight_indices: unsafe {
+            std::slice::from_raw_parts(weight_indices_ptr, weight_indices_len)
+        },
+        weight_values: unsafe { std::slice::from_raw_parts(weight_values_ptr, weight_values_len) },
         rest_vertices: unsafe { std::slice::from_raw_parts(rest_vertices_ptr, rest_vertices_len) },
         skinning_transforms: unsafe {
             std::slice::from_raw_parts(skinning_transforms_ptr, skinning_transforms_len)

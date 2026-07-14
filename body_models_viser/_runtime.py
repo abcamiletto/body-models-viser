@@ -23,24 +23,46 @@ from ._client_autobuild import ensure_client_is_built
 
 
 @dataclasses.dataclass
+class BodyModelsViserAssetMessage(_messages.Message, include_in_scene_serialization=True):
+    asset_id: int
+    faces: npt.NDArray[np.uint32]
+    skin_weight_offsets: npt.NDArray[np.uint32]
+    skin_weight_indices: npt.NDArray[np.uint16]
+    skin_weight_values: npt.NDArray[np.float32]
+    corrective_basis: npt.NDArray[np.int16] | None
+    corrective_scales: npt.NDArray[np.float32] | None
+
+
+@dataclasses.dataclass
 class BodyModelsViserModelMessage(_messages.Message, include_in_scene_serialization=True):
     name: str
-    skin_weights: npt.NDArray[np.float32]
-    faces: npt.NDArray[np.uint32]
+    asset_id: int
     rest_vertices: npt.NDArray[np.float32]
     skinning_transforms: npt.NDArray[np.float32]
-    pose_offsets: npt.NDArray[np.float32]
+    pose_coefficients: npt.NDArray[np.float32] | None
     global_rotation: npt.NDArray[np.float32]
     global_translation: npt.NDArray[np.float32]
     props: dict[str, Any]
 
 
 @dataclasses.dataclass
+class BodyModelsViserIdentityMessage(_messages.Message, include_in_scene_serialization=True):
+    name: str
+    rest_vertices: npt.NDArray[np.float32]
+    skinning_transforms: npt.NDArray[np.float32]
+    pose_coefficients: npt.NDArray[np.float32] | None
+
+
+@dataclasses.dataclass
 class BodyModelsViserPoseMessage(_messages.Message, include_in_scene_serialization=True):
     name: str
-    rest_vertices: npt.NDArray[np.float32] | None
-    skinning_transforms: npt.NDArray[np.float32] | None
-    pose_offsets: npt.NDArray[np.float32] | None
+    skinning_transforms: npt.NDArray[np.float32]
+    pose_coefficients: npt.NDArray[np.float32] | None
+
+
+@dataclasses.dataclass
+class BodyModelsViserTransformMessage(_messages.Message, include_in_scene_serialization=True):
+    name: str
     global_rotation: npt.NDArray[np.float32]
     global_translation: npt.NDArray[np.float32]
 
@@ -51,11 +73,18 @@ class BodyModelsViserReadyMessage(_messages.Message, include_in_scene_serializat
 
 
 @dataclasses.dataclass
+class _AssetRecord:
+    message: BodyModelsViserAssetMessage
+    refcount: int = 1
+
+
+@dataclasses.dataclass
 class RuntimeState:
     """Per-scene registry of body models, replayed to late-joining clients."""
 
+    assets: dict[tuple[Any, bool], _AssetRecord] = dataclasses.field(default_factory=dict)
     models: dict[str, BodyModelsViserModelMessage] = dataclasses.field(default_factory=dict)
-    poses: dict[str, BodyModelsViserPoseMessage] = dataclasses.field(default_factory=dict)
+    next_asset_id: int = 1
     ready_clients: set[int] = dataclasses.field(default_factory=set)
     installed_clients: set[int] = dataclasses.field(default_factory=set)
     initialized_serializers: weakref.WeakSet[Any] = dataclasses.field(
@@ -119,10 +148,10 @@ def _install_client(websock: Any, state: RuntimeState, client_id: int) -> None:
 
 
 def _replay_state(client_state: Any, state: RuntimeState) -> None:
-    for name, message in state.models.items():
+    for asset in state.assets.values():
+        client_state.message_buffer.push(asset.message)
+    for message in state.models.values():
         client_state.message_buffer.push(message)
-        if name in state.poses:
-            client_state.message_buffer.push(state.poses[name])
 
 
 def _install_serializer_hook(websock: Any, state: RuntimeState) -> None:
@@ -132,10 +161,10 @@ def _install_serializer_hook(websock: Any, state: RuntimeState) -> None:
         serializer = original_get_message_serializer(filter)
         if state.models:
             _ensure_serializer_runtime(serializer, state)
-        for name, message in state.models.items():
+        for asset in state.assets.values():
+            serializer._insert_message(asset.message)
+        for message in state.models.values():
             serializer._insert_message(message)
-            if name in state.poses:
-                serializer._insert_message(state.poses[name])
         return serializer
 
     websock.get_message_serializer = get_message_serializer
@@ -192,11 +221,17 @@ def _preload_javascript() -> str:
   const key = "__BODY_MODELS_VISER_PRELOAD__";
   const pending = [];
   const originalPush = Array.prototype.push;
+  const bodyModelMessageTypes = new Set([
+    "BodyModelsViserAssetMessage",
+    "BodyModelsViserModelMessage",
+    "BodyModelsViserIdentityMessage",
+    "BodyModelsViserPoseMessage",
+    "BodyModelsViserTransformMessage",
+  ]);
   const isBodyModelMessage = (message) =>
     message !== null &&
     typeof message === "object" &&
-    (message.type === "BodyModelsViserModelMessage" ||
-      message.type === "BodyModelsViserPoseMessage");
+    bodyModelMessageTypes.has(message.type);
   const push = function (...messages) {
     const bodyModelMessages = messages.filter(isBodyModelMessage);
     const viserMessages = messages.filter((message) => !isBodyModelMessage(message));
