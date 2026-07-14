@@ -32,6 +32,10 @@ class BodyModelsViserAssetMessage(_messages.Message, include_in_scene_serializat
     corrective_basis: npt.NDArray[np.int16] | None
     corrective_scales: npt.NDArray[np.float32] | None
 
+    def redundancy_key(self) -> str:
+        # The viser default has no distinguishing name or UUID for assets.
+        return f"{type(self).__name__}_{self.asset_id}"
+
 
 @dataclasses.dataclass
 class BodyModelsViserModelMessage(_messages.Message, include_in_scene_serialization=True):
