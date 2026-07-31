@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import time
 
-import body_models_viser as bmv
 import numpy as np
 import viser
-from body_models.smpl.numpy import SMPL
+from body_models.smpl import SMPL
 
+import body_models_viser as bmv
 
 POSE_JOINTS = [
     ("Spine1", 2),
@@ -46,7 +46,8 @@ def add_controls(server: viser.ViserServer, handle: bmv.BodyModelHandle) -> None
         with server.gui.add_folder("Body Pose"):
             for label, joint in POSE_JOINTS:
                 for axis, axis_name in enumerate("XYZ"):
-                    add_slider(server, handle, f"{label} {axis_name}", "body_pose", (joint, axis), -1.5, 1.5, 0.05)
+                    index = (joint, axis)
+                    add_slider(server, handle, f"{label} {axis_name}", "body_pose", index, -1.5, 1.5, 0.05)
 
 
 def add_slider(

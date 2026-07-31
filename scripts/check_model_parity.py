@@ -1,20 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import wasmtime
-from body_models.anny.numpy import ANNY
-from body_models.flame.numpy import FLAME
-from body_models.garment_measurements.numpy import GarmentMeasurements
-from body_models.mano.numpy import MANO
-from body_models.mhr.numpy import MHR
-from body_models.skel.numpy import SKEL
-from body_models.smpl.numpy import SMPL
-from body_models.smplh.numpy import SMPLH
-from body_models.smplx.numpy import SMPLX
-from body_models.soma.numpy import SOMA
+from body_models.anny import ANNY
+from body_models.flame import FLAME
+from body_models.garment_measurements import GarmentMeasurements
+from body_models.mano import MANO
+from body_models.mhr import MHR
+from body_models.skel import SKEL
+from body_models.smpl import SMPL
+from body_models.smplh import SMPLH
+from body_models.smplx import SMPLX
+from body_models.soma import SOMA
+
 from body_models_viser import BodyModelHandle
 from body_models_viser._body_model import (
     _client_corrective_basis,
@@ -40,11 +42,15 @@ def main() -> None:
 
     for name, make_model in MODELS:
         model = make_model()
+        if isinstance(model, (MHR, SOMA)):
+            print(f"{name}: unsupported server-only pose offsets")
+            continue
         params = {
             key: np.asarray(value, dtype=np.float32).copy()
             for key, value in model.get_rest_pose().items()
         }
-        for key in model.pose_keys:
+        pose_keys = [key for key, spec in model.parameter_spec.items() if spec.role == "pose"]
+        for key in pose_keys:
             if params[key].size:
                 params[key].flat[0] = 0.15
         params["global_rotation"] = np.array([0.2, -0.1, 0.15], dtype=np.float32)
@@ -58,11 +64,8 @@ def main() -> None:
         )
         pose = handle._prepare_pose()
         skinning = model.prepare_skinning(identity=handle._prepared_identity, pose=pose)
-        if "pose_offsets" in skinning and not hasattr(model, "posedirs"):
-            print(f"{name}: unsupported server-only pose offsets")
-            continue
         corrective_basis = _client_corrective_basis(model)
-        if hasattr(model, "posedirs") and corrective_basis is None:
+        if "pose_offsets" in skinning and corrective_basis is None:
             print(f"{name}: unsupported corrective feature mapping")
             continue
         offsets, indices, values = _sparse_skin_weights(skinning["skin_weights"])
@@ -95,12 +98,18 @@ def main() -> None:
         else:
             pose_offsets_ptr = write_array(store, memory, alloc, pose_offsets_array)
 
-        expected = model.forward_vertices(**params, identity=handle._prepared_identity)
+        forward_params = {
+            key: value
+            for key, value in params.items()
+            if model.parameter_spec[key].role != "identity"
+        }
+        expected = model.forward_vertices(**forward_params, identity=handle._prepared_identity)
         offsets_ptr = write_array(store, memory, alloc, offsets)
         indices_ptr = write_array(store, memory, alloc, indices)
         values_ptr = write_array(store, memory, alloc, values)
         rest_ptr = write_array(store, memory, alloc, skinning["rest_vertices"])
-        transforms_ptr = write_array(store, memory, alloc, skinning["skinning_transforms"])
+        transforms = skinning["skinning_transforms"]
+        transforms_ptr = write_array(store, memory, alloc, transforms)
         rotation_ptr = write_array(store, memory, alloc, params["global_rotation"])
         translation_ptr = write_array(store, memory, alloc, params["global_translation"])
         output_ptr = alloc(store, expected.size * 4)
@@ -136,7 +145,8 @@ def write_array(store, memory, alloc, values) -> int:
 
 def read_f32(store, memory, ptr: int, shape: tuple[int, ...]) -> np.ndarray:
     size = int(np.prod(shape))
-    return np.frombuffer(memory.read(store, ptr, ptr + size * 4), dtype="<f4").reshape(shape)
+    buffer = memory.read(store, ptr, ptr + size * 4)
+    return np.frombuffer(buffer, dtype="<f4").reshape(shape)
 
 
 MODELS: list[tuple[str, Callable[[], Any]]] = [

@@ -16,7 +16,7 @@ MANO, FLAME, SKEL, ANNY, and GarmentMeasurements.
 ```python
 import body_models_viser as bmv
 import viser
-from body_models.smpl.numpy import SMPL
+from body_models.smpl import SMPL
 
 server = viser.ViserServer()
 model = SMPL(gender="neutral")
@@ -113,8 +113,9 @@ updates link transforms from `forward_links()` when the pose changes.
 `handle.set_identity(...)` sends rest vertices and pose state.
 `handle.set_pose(...)` sends only joint transforms and, when requested, pose
 coefficients. `handle.set_transform(...)` sends only the global transform.
-Models with an explicit `posedirs` basis use `prepare_pose(skip_vertices=True)`,
-so Python never evaluates their per-vertex pose-corrective offsets.
+`body-models` 0.20.1 computes pose offsets as part of `prepare_pose()`. The
+offsets are discarded here: when correctives are enabled, the browser evaluates
+the corrective basis and otherwise renders with linear-blend skinning only.
 
 Without correctives, Rust applies sparse linear-blend skinning in WASM. With
 correctives, a fused WebGPU kernel evaluates correctives and skinning together;

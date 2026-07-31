@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import types
+
+import body_models
 import numpy as np
 import pytest
 import trimesh
@@ -21,11 +24,22 @@ def rotation_z(angle: float) -> np.ndarray:
 class StubRigidModel(RigidBodyModel):
     """Two one-triangle links; link i rotates about z by body_pose[i] at x=i."""
 
-    parents = [-1, 0]
-    link_vertex_starts = [0, 3]
-    link_vertex_counts = [3, 3]
-    link_face_starts = [0, 1]
-    link_face_counts = [1, 1]
+    parents = (-1, 0)
+
+    def __init__(self) -> None:
+        self._weights = types.SimpleNamespace(
+            link_vertex_starts=[0, 3],
+            link_vertex_counts=[3, 3],
+            link_face_starts=[0, 1],
+            link_face_counts=[1, 1],
+        )
+
+    @property
+    def parameter_spec(self):
+        return {
+            "body_pose": body_models.ParameterSpec((2,), "pose"),
+            "global_translation": body_models.ParameterSpec((3,), "transform"),
+        }
 
     @property
     def faces(self):
@@ -122,7 +136,8 @@ def test_set_pose_moves_links(scene):
 
     np.testing.assert_allclose(handle.links[1].position, [1.0, 0.0, 0.0], atol=1e-6)
     half = np.pi / 4
-    np.testing.assert_allclose(handle.links[1].wxyz, [np.cos(half), 0.0, 0.0, np.sin(half)], atol=1e-6)
+    expected = [np.cos(half), 0.0, 0.0, np.sin(half)]
+    np.testing.assert_allclose(handle.links[1].wxyz, expected, atol=1e-6)
     np.testing.assert_array_equal(handle.body_pose, posed)
     handle.remove()
 

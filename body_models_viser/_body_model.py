@@ -5,10 +5,9 @@ from typing import Any
 
 import body_models
 import numpy as np
-from body_models.mhr.numpy import MHR
-from body_models.skel.numpy import SKEL
-from body_models.soma.numpy import SOMA
-from jaxtyping import Float
+from body_models.mhr import MHR
+from body_models.skel import SKEL
+from body_models.soma import SOMA
 from viser import _messages
 
 from . import _runtime
@@ -20,7 +19,7 @@ from ._runtime import (
     BodyModelsViserTransformMessage,
 )
 
-Params = dict[str, Float[np.ndarray, "dim"] | Float[np.ndarray, "joints 3"]]
+Params = dict[str, np.ndarray]
 _SERVER_ONLY_CORRECTIVE_MODELS = (MHR, SOMA)
 _NONSTANDARD_CORRECTIVE_MODELS = (SKEL,)
 
@@ -54,21 +53,23 @@ class BodyModelHandle:
     def __setattr__(self, key: str, value: Any) -> None:
         model = self.__dict__.get("model")
         if model is not None:
-            if key in model.identity_keys:
+            spec = model.parameter_spec.get(key)
+            if spec is not None and spec.role == "identity":
                 self.set_identity(**{key: value})
                 return
-            if key in model.pose_keys:
+            if spec is not None and spec.role == "pose":
                 self.set_pose(**{key: value})
                 return
-            if key in model.transform_keys:
+            if spec is not None and spec.role == "transform":
                 self.set_transform(**{key: value})
                 return
         super().__setattr__(key, value)
 
     def set_identity(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - set(self.model.identity_keys)
+        invalid = params.keys() - _parameter_keys(self.model, "identity")
         if invalid:
-            raise ValueError(f"Invalid identity parameter(s): {', '.join(sorted(invalid))}.")
+            names = ", ".join(sorted(invalid))
+            raise ValueError(f"Invalid identity parameter(s): {names}.")
         self._update_params(params)
         self._prepared_identity = self._prepare_identity()
         skinning, coefficients = self._prepare_skinning()
@@ -88,9 +89,10 @@ class BodyModelHandle:
         _runtime.broadcast(self.scene, message)
 
     def set_pose(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - set(self.model.pose_keys)
+        invalid = params.keys() - _parameter_keys(self.model, "pose")
         if invalid:
-            raise ValueError(f"Invalid pose parameter(s): {', '.join(sorted(invalid))}.")
+            names = ", ".join(sorted(invalid))
+            raise ValueError(f"Invalid pose parameter(s): {names}.")
         self._update_params(params)
         skinning, coefficients = self._prepare_skinning()
         message = BodyModelsViserPoseMessage(
@@ -107,9 +109,10 @@ class BodyModelHandle:
         _runtime.broadcast(self.scene, message)
 
     def set_transform(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - set(self.model.transform_keys)
+        invalid = params.keys() - _parameter_keys(self.model, "transform")
         if invalid:
-            raise ValueError(f"Invalid transform parameter(s): {', '.join(sorted(invalid))}.")
+            names = ", ".join(sorted(invalid))
+            raise ValueError(f"Invalid transform parameter(s): {names}.")
         self._update_params(params)
         message = BodyModelsViserTransformMessage(
             name=self.name,
@@ -131,19 +134,14 @@ class BodyModelHandle:
         _runtime.broadcast(self.scene, _messages.RemoveSceneNodeMessage(self.name))
 
     def _prepare_identity(self) -> Any:
-        identity_params = {key: self.params[key] for key in self.model.identity_keys}
+        identity_keys = _parameter_keys(self.model, "identity")
+        identity_params = {key: self.params[key] for key in identity_keys}
         return self.model.prepare_identity(**identity_params)
 
     def _prepare_pose(self) -> Any:
-        pose_params = {key: self.params[key] for key in self.model.pose_keys}
-        return self.model.prepare_pose(
-            **pose_params,
-            identity=self._prepared_identity,
-            # Models with an explicit corrective basis can skip all per-vertex
-            # work. Other model families may need their ordinary preparation
-            # path to produce skinning transforms at all.
-            skip_vertices=hasattr(self.model, "posedirs"),
-        )
+        pose_keys = _parameter_keys(self.model, "pose")
+        pose_params = {key: self.params[key] for key in pose_keys}
+        return self.model.prepare_pose(**pose_params, identity=self._prepared_identity)
 
     def _prepare_skinning(self) -> tuple[Any, np.ndarray | None]:
         prepared_pose = self._prepare_pose()
@@ -151,11 +149,14 @@ class BodyModelHandle:
             identity=self._prepared_identity,
             pose=prepared_pose,
         )
-        if "pose_offsets" in skinning:
+        if (
+            "pose_offsets" in skinning
+            and _client_corrective_basis(self.model) is None
+            and not isinstance(self.model, _NONSTANDARD_CORRECTIVE_MODELS)
+        ):
             raise ValueError(
                 f"{type(self.model).__name__} only exposes server-side pose offsets, which "
-                "body-models-viser does not transmit. The model must expose a client-evaluable "
-                "posedirs basis or skinning transforms without pose offsets."
+                "body-models-viser does not transmit."
             )
         coefficients = None
         if self.use_pose_correctives:
@@ -186,12 +187,13 @@ def add_body_model(
     """Add a browser-skinned body model.
 
     Pose correctives are disabled by default. When enabled, the static
-    corrective basis is sent to the browser once and evaluated there; the
-    server never computes per-vertex corrective offsets. The basis is
-    quantized to signed 16-bit values with one scale per vertex coordinate.
+    corrective basis is quantized to signed 16-bit values, sent to the browser
+    once, and evaluated there. ``body-models`` currently still computes pose
+    offsets while preparing the transforms; those offsets are discarded.
     """
     if not isinstance(model, body_models.SkinnedModel):
-        raise TypeError(f"Expected body_models.SkinnedModel, got {type(model).__name__}.")
+        model_name = type(model).__name__
+        raise TypeError(f"Expected body_models.SkinnedModel, got {model_name}.")
     if isinstance(model, _SERVER_ONLY_CORRECTIVE_MODELS):
         raise ValueError(
             f"{type(model).__name__} only exposes server-side pose offsets, which "
@@ -298,12 +300,13 @@ def _release_asset(
 def _client_corrective_basis(model: body_models.SkinnedModel) -> np.ndarray | None:
     if isinstance(model, _NONSTANDARD_CORRECTIVE_MODELS):
         return None
-    posedirs = getattr(model, "posedirs", None)
-    parents = getattr(model, "parents", None)
-    if posedirs is None or parents is None:
+    # body-models 0.20.1 has no public accessor for the corrective basis.
+    weights = getattr(model, "_weights", None)
+    posedirs = getattr(weights, "posedirs", None)
+    if posedirs is None:
         return None
     basis = np.asarray(posedirs)
-    expected_features = 9 * (len(parents) - 1)
+    expected_features = 9 * (len(model.parents) - 1)
     if basis.ndim != 2 or basis.shape[0] != expected_features:
         return None
     return basis
@@ -311,9 +314,8 @@ def _client_corrective_basis(model: body_models.SkinnedModel) -> np.ndarray | No
 
 def _pose_coefficients(model: body_models.SkinnedModel, prepared_pose: Any) -> np.ndarray:
     try:
-        world_rotations = np.asarray(prepared_pose["skeleton_transforms"], dtype=np.float32)[
-            :, :3, :3
-        ]
+        skeleton_transforms = prepared_pose["skeleton_transforms"]
+        world_rotations = np.asarray(skeleton_transforms, dtype=np.float32)[:, :3, :3]
     except (KeyError, TypeError, IndexError) as exc:
         raise ValueError(
             f"{type(model).__name__} does not expose skeleton_transforms needed for pose correctives."
@@ -324,7 +326,8 @@ def _pose_coefficients(model: body_models.SkinnedModel, prepared_pose: Any) -> n
 
     local_rotations = world_rotations.copy()
     for joint in range(1, len(parents)):
-        local_rotations[joint] = world_rotations[parents[joint]].T @ world_rotations[joint]
+        parent_rotation = world_rotations[parents[joint]]
+        local_rotations[joint] = parent_rotation.T @ world_rotations[joint]
     identity = np.eye(3, dtype=np.float32)
     coefficients = (local_rotations[1:] - identity).reshape(-1)
     basis = _client_corrective_basis(model)
@@ -381,3 +384,10 @@ def _sparse_skin_weights(weights: Any) -> tuple[np.ndarray, np.ndarray, np.ndarr
 
 def _f32(array: Any) -> np.ndarray:
     return np.ascontiguousarray(array, dtype="<f4")
+
+
+def _parameter_keys(
+    model: body_models.ArticulatedModel,
+    role: body_models.ParameterRole,
+) -> set[str]:
+    return {name for name, spec in model.parameter_spec.items() if spec.role == role}
