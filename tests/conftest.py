@@ -11,9 +11,17 @@ import viser
 class StubModel:
     """Minimal body-models-protocol model: 2 vertices, 2 joints."""
 
-    identity_keys = ("shape",)
-    pose_keys = ("body_pose",)
-    transform_keys = ("global_translation", "global_rotation")
+    @property
+    def parameter_spec(self):
+        return {
+            "shape": body_models.ParameterSpec((3,), "identity"),
+            "body_pose": body_models.ParameterSpec((2, 3), "pose"),
+            "global_rotation": body_models.ParameterSpec.rotation(
+                "axis_angle",
+                role="transform",
+            ),
+            "global_translation": body_models.ParameterSpec((3,), "transform"),
+        }
 
     def get_rest_pose(self):
         return {
@@ -26,7 +34,7 @@ class StubModel:
     def prepare_identity(self, shape):
         return {"shape": np.asarray(shape)}
 
-    def prepare_pose(self, body_pose, *, identity, skip_vertices=False):
+    def prepare_pose(self, body_pose, *, identity):
         transforms = np.stack([np.eye(4, dtype=np.float32)] * 2)
         transforms[:, :3, 3] = body_pose
         return {

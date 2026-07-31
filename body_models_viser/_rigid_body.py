@@ -73,7 +73,8 @@ class ViserRigidBodyModelHandle:
     def set_pose(self, **forward_kwargs: Float[np.ndarray, "..."] | np.ndarray) -> None:
         invalid = forward_kwargs.keys() - self.pose.keys()
         if invalid:
-            raise ValueError(f"{self.model_name} does not support: {', '.join(sorted(invalid))}.")
+            names = ", ".join(sorted(invalid))
+            raise ValueError(f"{self.model_name} does not support: {names}.")
         for name, value in forward_kwargs.items():
             self.pose[name] = np.asarray(value).copy()
         self._apply_pose()
@@ -103,19 +104,22 @@ def add_rigid_body_model(
     """Add a rigid articulated body model to a ``viser`` scene."""
     if not isinstance(model, RigidBodyModel):
         model_name = model.__class__.__name__
-        raise TypeError(f"add_rigid_body_model() expects a body_models.RigidBodyModel, got {model_name}.")
+        expected = "body_models.RigidBodyModel"
+        raise TypeError(f"add_rigid_body_model() expects a {expected}, got {model_name}.")
 
     pose = model.get_rest_pose()
     rest_links = np.asarray(model.forward_links(**pose))
     rest_mesh = model.forward_meshes(**pose)[0]
     root = scene.add_frame(name, show_axes=False)
+    # body-models 0.20.1 has no public accessor for per-link mesh ranges.
+    weights = model._weights
 
     links = []
     for index in range(len(model.link_names)):
-        vertex_start = model.link_vertex_starts[index]
-        vertex_count = model.link_vertex_counts[index]
-        face_start = model.link_face_starts[index]
-        face_count = model.link_face_counts[index]
+        vertex_start = weights.link_vertex_starts[index]
+        vertex_count = weights.link_vertex_counts[index]
+        face_start = weights.link_face_starts[index]
+        face_count = weights.link_face_counts[index]
         world_vertices = rest_mesh.vertices[vertex_start : vertex_start + vertex_count]
         faces = rest_mesh.faces[face_start : face_start + face_count] - vertex_start
         # Bake each link mesh into its link frame so pose updates only move the

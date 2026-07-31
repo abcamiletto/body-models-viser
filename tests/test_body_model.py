@@ -1,23 +1,26 @@
 from __future__ import annotations
 
+import types
+
+import body_models
 import numpy as np
 import pytest
 from conftest import FakeClientState, StubModel
 
-import body_models
 import body_models_viser as bmv
 from body_models_viser import _runtime
 
 
 class CorrectiveStubModel(StubModel):
-    parents = [-1, 0]
+    parents = (-1, 0)
 
     def __init__(self) -> None:
-        self.posedirs = np.zeros((9, 6), dtype=np.float32)
-        self.posedirs[0, 0] = 0.25
+        posedirs = np.zeros((9, 6), dtype=np.float32)
+        posedirs[0, 0] = 0.25
+        self._weights = types.SimpleNamespace(posedirs=posedirs)
         self.server_corrective_evaluations = 0
 
-    def prepare_pose(self, body_pose, *, identity, skip_vertices=False):
+    def prepare_pose(self, body_pose, *, identity):
         angle = float(body_pose[1, 2])
         c, s = np.cos(angle), np.sin(angle)
         transforms = np.stack([np.eye(4, dtype=np.float32)] * 2)
@@ -26,10 +29,9 @@ class CorrectiveStubModel(StubModel):
             "skeleton_transforms": transforms,
             "skinning_transforms": transforms,
         }
-        if not skip_vertices:
-            self.server_corrective_evaluations += 1
-            coefficients = (transforms[1, :3, :3] - np.eye(3)).reshape(-1)
-            pose["pose_offsets"] = (coefficients @ self.posedirs).reshape(2, 3)
+        self.server_corrective_evaluations += 1
+        coefficients = (transforms[1, :3, :3] - np.eye(3)).reshape(-1)
+        pose["pose_offsets"] = (coefficients @ self._weights.posedirs).reshape(2, 3)
         return pose
 
 
@@ -90,7 +92,7 @@ def test_duplicate_name_is_rejected(scene):
         bmv.add_body_model(scene, "/stub", StubModel())
 
 
-def test_pose_correctives_are_only_evaluated_in_client(scene):
+def test_pose_correctives_are_sent_for_client_evaluation(scene):
     model = CorrectiveStubModel()
     handle = bmv.add_body_model(
         scene,
@@ -106,7 +108,7 @@ def test_pose_correctives_are_only_evaluated_in_client(scene):
     assert asset.corrective_basis.shape == (6, 9)
     assert asset.corrective_scales is not None
     assert state.models["/corrective"].pose_coefficients is not None
-    assert model.server_corrective_evaluations == 0
+    assert model.server_corrective_evaluations == 1
 
     pose = np.zeros((2, 3), dtype=np.float32)
     pose[1, 2] = 0.5
@@ -115,7 +117,7 @@ def test_pose_correctives_are_only_evaluated_in_client(scene):
     coefficients = state.models["/corrective"].pose_coefficients
     assert coefficients is not None
     assert np.any(coefficients != 0.0)
-    assert model.server_corrective_evaluations == 0
+    assert model.server_corrective_evaluations == 2
 
 
 def test_correctives_require_a_basis(scene):
