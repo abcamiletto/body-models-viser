@@ -10,8 +10,8 @@ buffers. Rust owns the stateless fallback kernels.
 
 ### Skinned Body Models
 
-Use `add_body_model()` for non-rigid skinned body models such as SMPL, SMPL-X,
-MANO, FLAME, SKEL, ANNY, and GarmentMeasurements.
+Use `add_body_model()` for any `body_models.SkinnedModel`, including SMPL,
+SMPL-X, MANO, FLAME, MHR, SOMA, SKEL, ANNY, and GarmentMeasurements.
 
 ```python
 import body_models_viser as bmv
@@ -51,13 +51,12 @@ handle = bmv.add_body_model(
 )
 ```
 
-Correctives are always evaluated in the client. Enabling them sends a 16-bit
-quantized corrective basis once per shared model asset, then sends only the
-small pose-coefficient vector on each update. For full-resolution SMPL-X the
-one-time basis is about 29.1 MiB (30.6 MB); it is not retransmitted per body or
-frame. The quantized model data is available to browser clients, so
-applications must ensure that this is compatible with the model asset's
-license.
+Correctives are evaluated in the client. Enabling them sends the model's dense
+or sparse corrective basis once per shared asset, quantized to signed 16-bit
+values, then sends only the small coefficient vector on each pose update. The
+basis is not retransmitted per body or frame. Browser clients receive this
+model data, so applications must ensure that doing so is compatible with the
+asset's license.
 
 ### Skeletons
 
@@ -97,9 +96,9 @@ handle = bmv.add_rigid_body_model(server.scene, "/robot", model)
 handle.set_pose(body_pose=handle.pose["body_pose"])
 ```
 
-The rigid-body helper bakes one static link-local mesh per link from the rest
-pose (`forward_meshes()` sliced with the model's link metadata), then only
-updates link transforms from `forward_links()` when the pose changes.
+The rigid-body helper creates one static mesh from each public `link_meshes`
+entry, then only updates its transform from `forward_links()` when the pose
+changes.
 
 ## Runtime
 
@@ -113,23 +112,16 @@ updates link transforms from `forward_links()` when the pose changes.
 `handle.set_identity(...)` sends rest vertices and pose state.
 `handle.set_pose(...)` sends only joint transforms and, when requested, pose
 coefficients. `handle.set_transform(...)` sends only the global transform.
-`body-models` 0.20.1 computes pose offsets as part of `prepare_pose()`. The
-offsets are discarded here: when correctives are enabled, the browser evaluates
-the corrective basis and otherwise renders with linear-blend skinning only.
-
 Without correctives, Rust applies sparse linear-blend skinning in WASM. With
-correctives, a fused WebGPU kernel evaluates correctives and skinning together;
-the runtime falls back to WASM when WebGPU is unavailable. In both cases the
-resulting vertex buffer is forwarded to viser as a regular mesh message.
+correctives, a fused WebGPU kernel evaluates the corrective basis and skinning
+together; the runtime falls back to WASM when WebGPU is unavailable. Both paths
+preserve the basis representation exposed by `body-models`: dense bases remain
+dense, while sparse bases remain sparse. The resulting vertex buffer is sent to
+viser as a regular mesh message.
 
-The browser protocol remains model-agnostic. Client correctives require the
-model to use compatible `posedirs`, `parents`, and prepared
-`skeleton_transforms`, as the SMPL, SMPL-H, SMPL-X, MANO, and FLAME
-implementations in `body-models` do. SKEL uses a different corrective feature
-mapping and therefore currently renders without correctives. Models such as
-MHR and SOMA currently expose only server-computed pose offsets; they are
-rejected instead of silently doing per-vertex server work or rendering without
-their required deformation.
+The browser protocol is model-agnostic. It consumes only the public
+`SkinningSpec`, prepared identity and pose state, and `link_meshes` contracts
+introduced in `body-models` 0.21.1.
 
 ## viser compatibility
 

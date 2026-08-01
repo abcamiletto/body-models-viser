@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import types
-
 import body_models
 import numpy as np
 import pytest
@@ -15,37 +13,63 @@ class CorrectiveStubModel(StubModel):
     parents = (-1, 0)
 
     def __init__(self) -> None:
-        posedirs = np.zeros((9, 6), dtype=np.float32)
-        posedirs[0, 0] = 0.25
-        self._weights = types.SimpleNamespace(posedirs=posedirs)
-        self.server_corrective_evaluations = 0
+        self.corrective_values = np.zeros((9, 6), dtype=np.float32)
+        self.corrective_values[0, 0] = 0.25
+
+    @property
+    def skinning_spec(self):
+        spec = super().skinning_spec
+        return body_models.SkinningSpec(
+            triangles=spec.triangles,
+            skinning_weights=spec.skinning_weights,
+            corrective_basis=body_models.DenseCorrectiveBasis(self.corrective_values),
+        )
 
     def prepare_pose(self, body_pose, *, identity):
         angle = float(body_pose[1, 2])
         c, s = np.cos(angle), np.sin(angle)
         transforms = np.stack([np.eye(4, dtype=np.float32)] * 2)
         transforms[1, :3, :3] = [[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]]
-        pose = {
+        coefficients = (transforms[1, :3, :3] - np.eye(3)).reshape(-1)
+        return {
             "skeleton_transforms": transforms,
             "skinning_transforms": transforms,
+            "pose_coefficients": coefficients,
         }
-        self.server_corrective_evaluations += 1
-        coefficients = (transforms[1, :3, :3] - np.eye(3)).reshape(-1)
-        pose["pose_offsets"] = (coefficients @ self._weights.posedirs).reshape(2, 3)
-        return pose
 
 
 body_models.SkinnedModel.register(CorrectiveStubModel)
 
 
-class ServerOffsetStubModel(StubModel):
-    def prepare_skinning(self, *, identity, pose):
-        skinning = super().prepare_skinning(identity=identity, pose=pose)
-        skinning["pose_offsets"] = np.ones_like(skinning["rest_vertices"])
-        return skinning
+class _SparseLinear:
+    shape = (9, 6)
+
+    def __call__(self, coefficients):
+        output = np.zeros((*coefficients.shape[:-1], 6), dtype=np.float32)
+        output[..., 0] = coefficients[..., 0] * 0.25
+        return output
+
+    def to_coo(self):
+        return body_models.SparseMatrix(
+            row_indices=np.array([0]),
+            column_indices=np.array([0]),
+            values=np.array([0.25], dtype=np.float32),
+            shape=self.shape,
+        )
 
 
-body_models.SkinnedModel.register(ServerOffsetStubModel)
+class SparseCorrectiveStubModel(CorrectiveStubModel):
+    @property
+    def skinning_spec(self):
+        spec = StubModel.skinning_spec.__get__(self)
+        return body_models.SkinningSpec(
+            triangles=spec.triangles,
+            skinning_weights=spec.skinning_weights,
+            corrective_basis=body_models.SparseCorrectiveBasis(_SparseLinear()),
+        )
+
+
+body_models.SkinnedModel.register(SparseCorrectiveStubModel)
 
 
 def state_of(scene):
@@ -57,16 +81,24 @@ def test_add_records_shared_asset_and_model(scene):
 
     assert isinstance(handle, bmv.BodyModelHandle)
     assert handle.use_pose_correctives is False
-    assert set(handle.params) == {"shape", "body_pose", "global_rotation", "global_translation"}
+    assert set(handle.params) == {
+        "shape",
+        "body_pose",
+        "global_rotation",
+        "global_translation",
+    }
     assert all(value.dtype == np.float32 for value in handle.params.values())
 
     state = state_of(scene)
     message = state.models["/stub"]
     asset = next(iter(state.assets.values())).message
     assert asset.faces.dtype == np.uint32
-    assert asset.corrective_basis is None
+    assert asset.corrective_format is None
+    assert asset.corrective_values is None
     assert asset.corrective_scales is None
-    np.testing.assert_array_equal(message.rest_vertices, [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    np.testing.assert_array_equal(
+        message.rest_vertices, [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]
+    )
     np.testing.assert_array_equal(asset.skin_weight_offsets, [0, 1, 2])
     np.testing.assert_array_equal(asset.skin_weight_indices, [0, 1])
     np.testing.assert_array_equal(asset.skin_weight_values, [1.0, 1.0])
@@ -103,12 +135,14 @@ def test_pose_correctives_are_sent_for_client_evaluation(scene):
 
     state = state_of(scene)
     asset = next(iter(state.assets.values())).message
-    assert asset.corrective_basis is not None
-    assert asset.corrective_basis.dtype == np.int16
-    assert asset.corrective_basis.shape == (6, 9)
+    assert asset.corrective_format == "dense"
+    assert asset.corrective_values is not None
+    assert asset.corrective_values.dtype == np.int16
+    assert asset.corrective_values.shape == (54,)
     assert asset.corrective_scales is not None
+    assert asset.corrective_offsets is None
+    assert asset.corrective_indices is None
     assert state.models["/corrective"].pose_coefficients is not None
-    assert model.server_corrective_evaluations == 1
 
     pose = np.zeros((2, 3), dtype=np.float32)
     pose[1, 2] = 0.5
@@ -117,17 +151,26 @@ def test_pose_correctives_are_sent_for_client_evaluation(scene):
     coefficients = state.models["/corrective"].pose_coefficients
     assert coefficients is not None
     assert np.any(coefficients != 0.0)
-    assert model.server_corrective_evaluations == 2
+
+
+def test_sparse_pose_correctives_are_preserved(scene):
+    bmv.add_body_model(
+        scene,
+        "/sparse",
+        SparseCorrectiveStubModel(),
+        use_pose_correctives=True,
+    )
+
+    asset = next(iter(state_of(scene).assets.values())).message
+    assert asset.corrective_format == "sparse"
+    np.testing.assert_array_equal(asset.corrective_offsets, [0, 1, 1, 1, 1, 1, 1])
+    np.testing.assert_array_equal(asset.corrective_indices, [0])
+    np.testing.assert_array_equal(asset.corrective_values, [32767])
 
 
 def test_correctives_require_a_basis(scene):
-    with pytest.raises(ValueError, match="does not expose compatible client-side pose correctives"):
+    with pytest.raises(ValueError, match="has no pose-corrective basis"):
         bmv.add_body_model(scene, "/stub", StubModel(), use_pose_correctives=True)
-
-
-def test_server_only_pose_offsets_are_rejected(scene):
-    with pytest.raises(ValueError, match="only exposes server-side pose offsets"):
-        bmv.add_body_model(scene, "/offsets", ServerOffsetStubModel())
 
 
 def test_unsupported_model_raises(scene):
@@ -137,7 +180,9 @@ def test_unsupported_model_raises(scene):
 
 def test_set_pose_records_pose_only_message(scene, monkeypatch):
     messages = []
-    monkeypatch.setattr(_runtime, "broadcast", lambda scene, message: messages.append(message))
+    monkeypatch.setattr(
+        _runtime, "broadcast", lambda scene, message: messages.append(message)
+    )
     handle = bmv.add_body_model(scene, "/stub", StubModel())
     posed = np.arange(6, dtype=np.float32).reshape(2, 3)
 
@@ -148,12 +193,13 @@ def test_set_pose_records_pose_only_message(scene, monkeypatch):
     np.testing.assert_array_equal(handle.body_pose, posed)
     broadcast = messages[-1]
     assert isinstance(broadcast, _runtime.BodyModelsViserPoseMessage)
-    assert not hasattr(broadcast, "rest_vertices")
 
 
 def test_set_identity_uses_identity_message(scene, monkeypatch):
     messages = []
-    monkeypatch.setattr(_runtime, "broadcast", lambda scene, message: messages.append(message))
+    monkeypatch.setattr(
+        _runtime, "broadcast", lambda scene, message: messages.append(message)
+    )
     handle = bmv.add_body_model(scene, "/stub", StubModel())
 
     handle.set_identity(shape=np.ones(3, dtype=np.float32))
@@ -185,7 +231,9 @@ def test_invalid_keys_raise(scene):
 
 def test_set_transform_records_transform_only_message(scene, monkeypatch):
     messages = []
-    monkeypatch.setattr(_runtime, "broadcast", lambda scene, message: messages.append(message))
+    monkeypatch.setattr(
+        _runtime, "broadcast", lambda scene, message: messages.append(message)
+    )
     handle = bmv.add_body_model(scene, "/stub", StubModel())
 
     handle.set_transform(global_translation=np.array([1.0, 2.0, 3.0]))

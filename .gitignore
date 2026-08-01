@@ -2,6 +2,7 @@
 /generated
 /body_models_viser/client
 /client/dist
+/client/.nodeenv
 /client/node_modules
 /dist
 __pycache__/

@@ -32,7 +32,13 @@ class StubModel:
         }
 
     def prepare_identity(self, shape):
-        return {"shape": np.asarray(shape)}
+        return {
+            "shape": np.asarray(shape),
+            "rest_vertices": np.array(
+                [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                dtype=np.float32,
+            ),
+        }
 
     def prepare_pose(self, body_pose, *, identity):
         transforms = np.stack([np.eye(4, dtype=np.float32)] * 2)
@@ -43,15 +49,15 @@ class StubModel:
             "skinning_transforms": transforms,
         }
 
-    def prepare_skinning(self, *, identity, pose):
-        # Encode the pose into the joint translations so tests can observe it.
-        return {
-            "skin_weights": np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
-            "faces": np.array([[0, 1, 0]], dtype=np.uint32),
-            "rest_vertices": np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]], dtype=np.float32),
-            "skinning_transforms": pose["skinning_transforms"],
-            # No "pose_offsets" key: exercises the zeros default.
-        }
+    @property
+    def skinning_spec(self):
+        return body_models.SkinningSpec(
+            triangles=np.array([[0, 1, 0]], dtype=np.uint32),
+            skinning_weights=np.array(
+                [[1.0, 0.0], [0.0, 1.0]],
+                dtype=np.float32,
+            ),
+        )
 
 
 body_models.SkinnedModel.register(StubModel)

@@ -13,7 +13,7 @@ import dataclasses
 import weakref
 from collections.abc import Callable
 from importlib.resources import files
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
@@ -23,14 +23,19 @@ from ._client_autobuild import ensure_client_is_built
 
 
 @dataclasses.dataclass
-class BodyModelsViserAssetMessage(_messages.Message, include_in_scene_serialization=True):
+class BodyModelsViserAssetMessage(
+    _messages.Message, include_in_scene_serialization=True
+):
     asset_id: int
     faces: npt.NDArray[np.uint32]
     skin_weight_offsets: npt.NDArray[np.uint32]
     skin_weight_indices: npt.NDArray[np.uint16]
     skin_weight_values: npt.NDArray[np.float32]
-    corrective_basis: npt.NDArray[np.int16] | None
+    corrective_format: Literal["dense", "sparse"] | None
+    corrective_values: npt.NDArray[np.int16] | None
     corrective_scales: npt.NDArray[np.float32] | None
+    corrective_offsets: npt.NDArray[np.uint32] | None
+    corrective_indices: npt.NDArray[np.uint16] | None
 
     def redundancy_key(self) -> str:
         # The viser default has no distinguishing name or UUID for assets.
@@ -38,7 +43,9 @@ class BodyModelsViserAssetMessage(_messages.Message, include_in_scene_serializat
 
 
 @dataclasses.dataclass
-class BodyModelsViserModelMessage(_messages.Message, include_in_scene_serialization=True):
+class BodyModelsViserModelMessage(
+    _messages.Message, include_in_scene_serialization=True
+):
     name: str
     asset_id: int
     rest_vertices: npt.NDArray[np.float32]
@@ -50,7 +57,9 @@ class BodyModelsViserModelMessage(_messages.Message, include_in_scene_serializat
 
 
 @dataclasses.dataclass
-class BodyModelsViserIdentityMessage(_messages.Message, include_in_scene_serialization=True):
+class BodyModelsViserIdentityMessage(
+    _messages.Message, include_in_scene_serialization=True
+):
     name: str
     rest_vertices: npt.NDArray[np.float32]
     skinning_transforms: npt.NDArray[np.float32]
@@ -58,21 +67,27 @@ class BodyModelsViserIdentityMessage(_messages.Message, include_in_scene_seriali
 
 
 @dataclasses.dataclass
-class BodyModelsViserPoseMessage(_messages.Message, include_in_scene_serialization=True):
+class BodyModelsViserPoseMessage(
+    _messages.Message, include_in_scene_serialization=True
+):
     name: str
     skinning_transforms: npt.NDArray[np.float32]
     pose_coefficients: npt.NDArray[np.float32] | None
 
 
 @dataclasses.dataclass
-class BodyModelsViserTransformMessage(_messages.Message, include_in_scene_serialization=True):
+class BodyModelsViserTransformMessage(
+    _messages.Message, include_in_scene_serialization=True
+):
     name: str
     global_rotation: npt.NDArray[np.float32]
     global_translation: npt.NDArray[np.float32]
 
 
 @dataclasses.dataclass
-class BodyModelsViserReadyMessage(_messages.Message, include_in_scene_serialization=False):
+class BodyModelsViserReadyMessage(
+    _messages.Message, include_in_scene_serialization=False
+):
     pass
 
 
@@ -86,8 +101,12 @@ class _AssetRecord:
 class RuntimeState:
     """Per-scene registry of body models, replayed to late-joining clients."""
 
-    assets: dict[tuple[Any, bool], _AssetRecord] = dataclasses.field(default_factory=dict)
-    models: dict[str, BodyModelsViserModelMessage] = dataclasses.field(default_factory=dict)
+    assets: dict[tuple[Any, bool], _AssetRecord] = dataclasses.field(
+        default_factory=dict
+    )
+    models: dict[str, BodyModelsViserModelMessage] = dataclasses.field(
+        default_factory=dict
+    )
     next_asset_id: int = 1
     ready_clients: set[int] = dataclasses.field(default_factory=set)
     installed_clients: set[int] = dataclasses.field(default_factory=set)
@@ -147,7 +166,9 @@ def _install_client(websock: Any, state: RuntimeState, client_id: int) -> None:
         return
     state.installed_clients.add(client_id)
     client_state = websock._client_state_from_id[client_id]
-    client_state.message_buffer.push(_messages.RunJavascriptMessage(_install_javascript()))
+    client_state.message_buffer.push(
+        _messages.RunJavascriptMessage(_install_javascript())
+    )
     client_state.message_buffer.flush()
 
 
