@@ -6,7 +6,7 @@
   "scripts": {
     "build:wasm": "PATH=\"$HOME/.cargo/bin:$PATH\" cargo build --manifest-path ../Cargo.toml --release --target wasm32-unknown-unknown",
     "build": "npm run build:wasm && esbuild src/index.ts --bundle --format=iife --global-name=BodyModelsViser --target=es2022 --outfile=dist/body-models-viser.js && cp ../target/wasm32-unknown-unknown/release/body_models_viser.wasm dist/body-models-viser.wasm && mkdir -p ../body_models_viser/client && cp dist/body-models-viser.js dist/body-models-viser.wasm ../body_models_viser/client/",
-    "test": "npm run build",
+    "test": "npm run typecheck && npm run build",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

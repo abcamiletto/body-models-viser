@@ -20,9 +20,9 @@ pub unsafe extern "C" fn wasm_free(ptr: *mut u8, len: usize) {
 /// # Safety
 ///
 /// All pointers must refer to valid contiguous buffers for the given lengths.
-pub unsafe extern "C" fn compute_pose_offsets(
-    basis_ptr: *const i16,
-    basis_len: usize,
+pub unsafe extern "C" fn compute_dense_pose_offsets(
+    values_ptr: *const i16,
+    values_len: usize,
     scales_ptr: *const f32,
     scales_len: usize,
     coefficients_ptr: *const f32,
@@ -31,12 +31,43 @@ pub unsafe extern "C" fn compute_pose_offsets(
     output_len: usize,
 ) {
     assert_eq!(scales_len, output_len);
-    assert_eq!(basis_len, output_len * coefficients_len);
-    let basis = unsafe { std::slice::from_raw_parts(basis_ptr, basis_len) };
+    assert_eq!(values_len, output_len * coefficients_len);
+    let values = unsafe { std::slice::from_raw_parts(values_ptr, values_len) };
     let scales = unsafe { std::slice::from_raw_parts(scales_ptr, scales_len) };
     let coefficients = unsafe { std::slice::from_raw_parts(coefficients_ptr, coefficients_len) };
     let output = unsafe { std::slice::from_raw_parts_mut(output_ptr, output_len) };
-    skin::compute_pose_offsets(basis, scales, coefficients, output);
+    skin::compute_dense_pose_offsets(values, scales, coefficients, output);
+}
+
+#[unsafe(no_mangle)]
+/// # Safety
+///
+/// All pointers must refer to valid contiguous buffers for the given lengths.
+pub unsafe extern "C" fn compute_sparse_pose_offsets(
+    offsets_ptr: *const u32,
+    offsets_len: usize,
+    indices_ptr: *const u16,
+    indices_len: usize,
+    values_ptr: *const i16,
+    values_len: usize,
+    scales_ptr: *const f32,
+    scales_len: usize,
+    coefficients_ptr: *const f32,
+    coefficients_len: usize,
+    output_ptr: *mut f32,
+    output_len: usize,
+) {
+    assert_eq!(offsets_len, output_len + 1);
+    assert_eq!(indices_len, values_len);
+    assert_eq!(scales_len, output_len);
+    let offsets = unsafe { std::slice::from_raw_parts(offsets_ptr, offsets_len) };
+    assert_eq!(offsets[output_len] as usize, values_len);
+    let indices = unsafe { std::slice::from_raw_parts(indices_ptr, indices_len) };
+    let values = unsafe { std::slice::from_raw_parts(values_ptr, values_len) };
+    let scales = unsafe { std::slice::from_raw_parts(scales_ptr, scales_len) };
+    let coefficients = unsafe { std::slice::from_raw_parts(coefficients_ptr, coefficients_len) };
+    let output = unsafe { std::slice::from_raw_parts_mut(output_ptr, output_len) };
+    skin::compute_sparse_pose_offsets(offsets, indices, values, scales, coefficients, output);
 }
 
 #[unsafe(no_mangle)]

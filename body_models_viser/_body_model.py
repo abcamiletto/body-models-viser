@@ -5,9 +5,6 @@ from typing import Any
 
 import body_models
 import numpy as np
-from body_models.mhr import MHR
-from body_models.skel import SKEL
-from body_models.soma import SOMA
 from viser import _messages
 
 from . import _runtime
@@ -20,8 +17,23 @@ from ._runtime import (
 )
 
 Params = dict[str, np.ndarray]
-_SERVER_ONLY_CORRECTIVE_MODELS = (MHR, SOMA)
-_NONSTANDARD_CORRECTIVE_MODELS = (SKEL,)
+
+
+@dataclasses.dataclass(frozen=True)
+class _DenseCorrectives:
+    values: np.ndarray
+    scales: np.ndarray
+
+
+@dataclasses.dataclass(frozen=True)
+class _SparseCorrectives:
+    offsets: np.ndarray
+    indices: np.ndarray
+    values: np.ndarray
+    scales: np.ndarray
+
+
+_QuantizedCorrectives = _DenseCorrectives | _SparseCorrectives
 
 
 class BodyModelHandle:
@@ -72,11 +84,11 @@ class BodyModelHandle:
             raise ValueError(f"Invalid identity parameter(s): {names}.")
         self._update_params(params)
         self._prepared_identity = self._prepare_identity()
-        skinning, coefficients = self._prepare_skinning()
+        pose, coefficients = self._prepare_deformation()
         message = BodyModelsViserIdentityMessage(
             name=self.name,
-            rest_vertices=_f32(skinning["rest_vertices"]),
-            skinning_transforms=_f32(skinning["skinning_transforms"]),
+            rest_vertices=_f32(self._prepared_identity["rest_vertices"]),
+            skinning_transforms=_f32(pose["skinning_transforms"]),
             pose_coefficients=coefficients,
         )
         state = _runtime.get_state(self.scene)
@@ -94,10 +106,10 @@ class BodyModelHandle:
             names = ", ".join(sorted(invalid))
             raise ValueError(f"Invalid pose parameter(s): {names}.")
         self._update_params(params)
-        skinning, coefficients = self._prepare_skinning()
+        pose, coefficients = self._prepare_deformation()
         message = BodyModelsViserPoseMessage(
             name=self.name,
-            skinning_transforms=_f32(skinning["skinning_transforms"]),
+            skinning_transforms=_f32(pose["skinning_transforms"]),
             pose_coefficients=coefficients,
         )
         state = _runtime.get_state(self.scene)
@@ -136,32 +148,32 @@ class BodyModelHandle:
     def _prepare_identity(self) -> Any:
         identity_keys = _parameter_keys(self.model, "identity")
         identity_params = {key: self.params[key] for key in identity_keys}
-        return self.model.prepare_identity(**identity_params)
+        identity = self.model.prepare_identity(**identity_params)
+        if identity["rest_vertices"].ndim != 2:
+            raise ValueError("body-models-viser renders one model instance per handle.")
+        return identity
 
-    def _prepare_pose(self) -> Any:
+    def _prepare_pose(self) -> body_models.SkinningPose:
         pose_keys = _parameter_keys(self.model, "pose")
         pose_params = {key: self.params[key] for key in pose_keys}
         return self.model.prepare_pose(**pose_params, identity=self._prepared_identity)
 
-    def _prepare_skinning(self) -> tuple[Any, np.ndarray | None]:
-        prepared_pose = self._prepare_pose()
-        skinning = self.model.prepare_skinning(
-            identity=self._prepared_identity,
-            pose=prepared_pose,
-        )
-        if (
-            "pose_offsets" in skinning
-            and _client_corrective_basis(self.model) is None
-            and not isinstance(self.model, _NONSTANDARD_CORRECTIVE_MODELS)
-        ):
-            raise ValueError(
-                f"{type(self.model).__name__} only exposes server-side pose offsets, which "
-                "body-models-viser does not transmit."
-            )
+    def _prepare_deformation(
+        self,
+    ) -> tuple[body_models.SkinningPose, np.ndarray | None]:
+        pose = self._prepare_pose()
+        if pose["skinning_transforms"].ndim != 3:
+            raise ValueError("body-models-viser renders one model instance per handle.")
         coefficients = None
         if self.use_pose_correctives:
-            coefficients = _pose_coefficients(self.model, prepared_pose)
-        return skinning, coefficients
+            coefficients = _f32(pose["pose_coefficients"])
+            basis = self.model.skinning_spec.corrective_basis
+            if coefficients.shape != (basis.coefficient_dim,):
+                raise ValueError(
+                    f"Expected {basis.coefficient_dim} pose coefficients, "
+                    f"got shape {coefficients.shape}."
+                )
+        return pose, coefficients
 
     def _update_params(self, params: dict[str, np.ndarray]) -> None:
         for key, value in params.items():
@@ -186,29 +198,26 @@ def add_body_model(
 ) -> BodyModelHandle:
     """Add a browser-skinned body model.
 
-    Pose correctives are disabled by default. When enabled, the static
-    corrective basis is quantized to signed 16-bit values, sent to the browser
-    once, and evaluated there. ``body-models`` currently still computes pose
-    offsets while preparing the transforms; those offsets are discarded.
+    Pose correctives are disabled by default. When enabled, the model's dense
+    or sparse corrective basis is quantized once and evaluated in the browser.
     """
     if not isinstance(model, body_models.SkinnedModel):
         model_name = type(model).__name__
         raise TypeError(f"Expected body_models.SkinnedModel, got {model_name}.")
-    if isinstance(model, _SERVER_ONLY_CORRECTIVE_MODELS):
-        raise ValueError(
-            f"{type(model).__name__} only exposes server-side pose offsets, which "
-            "body-models-viser does not compute or transmit."
-        )
-    if use_pose_correctives and _client_corrective_basis(model) is None:
-        raise ValueError(
-            f"{type(model).__name__} does not expose compatible client-side pose correctives."
-        )
     state = _runtime.get_state(scene)
     if name in state.models:
         raise ValueError(f"A body model named {name!r} already exists.")
 
+    spec = model.skinning_spec
+    corrective_basis = spec.corrective_basis if use_pose_correctives else None
+    if use_pose_correctives and corrective_basis is None:
+        model_name = type(model).__name__
+        raise ValueError(f"{model_name} has no pose-corrective basis.")
     rest_pose = model.get_rest_pose()
-    params = {key: np.asarray(value, dtype=np.float32).copy() for key, value in rest_pose.items()}
+    params = {
+        key: np.asarray(value, dtype=np.float32).copy()
+        for key, value in rest_pose.items()
+    }
     handle = BodyModelHandle(
         scene,
         name,
@@ -216,12 +225,12 @@ def add_body_model(
         params,
         use_pose_correctives=use_pose_correctives,
     )
-    skinning, coefficients = handle._prepare_skinning()
+    pose, coefficients = handle._prepare_deformation()
     asset, is_new_asset = _acquire_asset(
         state,
         model,
-        skinning,
-        use_pose_correctives=use_pose_correctives,
+        spec,
+        corrective_basis,
     )
     if is_new_asset:
         _runtime.broadcast(scene, asset)
@@ -240,8 +249,8 @@ def add_body_model(
     message = BodyModelsViserModelMessage(
         name=name,
         asset_id=asset.asset_id,
-        rest_vertices=_f32(skinning["rest_vertices"]),
-        skinning_transforms=_f32(skinning["skinning_transforms"]),
+        rest_vertices=_f32(handle._prepared_identity["rest_vertices"]),
+        skinning_transforms=_f32(pose["skinning_transforms"]),
         pose_coefficients=coefficients,
         global_rotation=_f32(params["global_rotation"]),
         global_translation=_f32(params["global_translation"]),
@@ -255,13 +264,12 @@ def add_body_model(
 def _acquire_asset(
     state: _runtime.RuntimeState,
     model: body_models.SkinnedModel,
-    skinning: Any,
-    *,
-    use_pose_correctives: bool,
+    spec: body_models.SkinningSpec,
+    corrective_basis: body_models.CorrectiveBasis | None,
 ) -> tuple[BodyModelsViserAssetMessage, bool]:
     # Topology and skin weights are model-static. Keeping the model in the key
     # also prevents Python object-id reuse from aliasing unrelated assets.
-    key = (model, use_pose_correctives)
+    key = (model, corrective_basis is not None)
     existing = state.assets.get(key)
     if existing is not None:
         existing.refcount += 1
@@ -269,18 +277,38 @@ def _acquire_asset(
 
     asset_id = state.next_asset_id
     state.next_asset_id += 1
-    offsets, indices, values = _sparse_skin_weights(skinning["skin_weights"])
-    basis = scales = None
-    if use_pose_correctives:
-        basis, scales = _quantize_corrective_basis(model, skinning["rest_vertices"])
+    offsets, indices, values = _sparse_skin_weights(spec.skinning_weights)
+    correctives = (
+        None
+        if corrective_basis is None
+        else _quantize_corrective_basis(corrective_basis)
+    )
+    if correctives is None:
+        corrective_format = None
+        corrective_values = corrective_scales = None
+        corrective_offsets = corrective_indices = None
+    elif isinstance(correctives, _DenseCorrectives):
+        corrective_format = "dense"
+        corrective_values = correctives.values
+        corrective_scales = correctives.scales
+        corrective_offsets = corrective_indices = None
+    else:
+        corrective_format = "sparse"
+        corrective_values = correctives.values
+        corrective_scales = correctives.scales
+        corrective_offsets = correctives.offsets
+        corrective_indices = correctives.indices
     message = BodyModelsViserAssetMessage(
         asset_id=asset_id,
-        faces=np.ascontiguousarray(skinning["faces"], dtype="<u4"),
+        faces=np.ascontiguousarray(spec.triangles, dtype="<u4"),
         skin_weight_offsets=offsets,
         skin_weight_indices=indices,
         skin_weight_values=values,
-        corrective_basis=basis,
-        corrective_scales=scales,
+        corrective_format=corrective_format,
+        corrective_values=corrective_values,
+        corrective_scales=corrective_scales,
+        corrective_offsets=corrective_offsets,
+        corrective_indices=corrective_indices,
     )
     state.assets[key] = _runtime._AssetRecord(message)
     return message, True
@@ -297,67 +325,51 @@ def _release_asset(
     del state.assets[key]
 
 
-def _client_corrective_basis(model: body_models.SkinnedModel) -> np.ndarray | None:
-    if isinstance(model, _NONSTANDARD_CORRECTIVE_MODELS):
-        return None
-    # body-models 0.20.1 has no public accessor for the corrective basis.
-    weights = getattr(model, "_weights", None)
-    posedirs = getattr(weights, "posedirs", None)
-    if posedirs is None:
-        return None
-    basis = np.asarray(posedirs)
-    expected_features = 9 * (len(model.parents) - 1)
-    if basis.ndim != 2 or basis.shape[0] != expected_features:
-        return None
-    return basis
-
-
-def _pose_coefficients(model: body_models.SkinnedModel, prepared_pose: Any) -> np.ndarray:
-    try:
-        skeleton_transforms = prepared_pose["skeleton_transforms"]
-        world_rotations = np.asarray(skeleton_transforms, dtype=np.float32)[:, :3, :3]
-    except (KeyError, TypeError, IndexError) as exc:
-        raise ValueError(
-            f"{type(model).__name__} does not expose skeleton_transforms needed for pose correctives."
-        ) from exc
-    parents = np.asarray(model.parents, dtype=np.int64)
-    if world_rotations.shape != (len(parents), 3, 3):
-        raise ValueError("Client-side pose correctives currently require an unbatched skeleton.")
-
-    local_rotations = world_rotations.copy()
-    for joint in range(1, len(parents)):
-        parent_rotation = world_rotations[parents[joint]]
-        local_rotations[joint] = parent_rotation.T @ world_rotations[joint]
-    identity = np.eye(3, dtype=np.float32)
-    coefficients = (local_rotations[1:] - identity).reshape(-1)
-    basis = _client_corrective_basis(model)
-    assert basis is not None
-    expected = basis.shape[0]
-    if coefficients.size != expected:
-        raise ValueError(
-            f"Corrective basis expects {expected} pose coefficients, but the skeleton provides "
-            f"{coefficients.size}."
-        )
-    return _f32(coefficients)
-
-
 def _quantize_corrective_basis(
-    model: body_models.SkinnedModel,
-    rest_vertices: Any,
-) -> tuple[np.ndarray, np.ndarray]:
-    posedirs = _client_corrective_basis(model)
-    if posedirs is None:
-        raise ValueError(f"{type(model).__name__} has no compatible corrective basis.")
-    posedirs = np.asarray(posedirs, dtype=np.float32)
-    coordinate_count = np.asarray(rest_vertices).size
-    if posedirs.ndim != 2 or posedirs.shape[1] != coordinate_count:
-        raise ValueError(
-            f"Expected posedirs shape [P, {coordinate_count}], got {posedirs.shape}."
-        )
-    basis = posedirs.T
-    scales = np.max(np.abs(basis), axis=1) / 32767.0
+    corrective_basis: body_models.CorrectiveBasis,
+) -> _QuantizedCorrectives:
+    if isinstance(corrective_basis, body_models.DenseCorrectiveBasis):
+        values = np.asarray(corrective_basis.values, dtype=np.float32).T
+        quantized, scales = _quantize_rows(values)
+        return _DenseCorrectives(quantized.ravel(), scales)
+
+    coo = corrective_basis.to_coo()
+    if coo.shape[0] > np.iinfo(np.uint16).max + 1:
+        raise ValueError("Sparse correctives support at most 65536 coefficients.")
+    coefficient_indices = np.asarray(coo.row_indices)
+    coordinate_indices = np.asarray(coo.column_indices)
+    order = np.argsort(coordinate_indices, kind="stable")
+    coordinate_indices = coordinate_indices[order]
+    coefficient_indices = coefficient_indices[order]
+    values = np.asarray(coo.values, dtype=np.float32)[order]
+
+    coordinate_count = coo.shape[1]
+    counts = np.bincount(coordinate_indices, minlength=coordinate_count)
+    offsets = np.empty(coordinate_count + 1, dtype="<u4")
+    offsets[0] = 0
+    np.cumsum(counts, dtype=np.uint32, out=offsets[1:])
+    maxima = np.zeros(coordinate_count, dtype=np.float32)
+    np.maximum.at(maxima, coordinate_indices, np.abs(values))
+    scales = maxima / 32767.0
+    entry_scales = scales[coordinate_indices]
+    denominators = np.where(entry_scales == 0.0, 1.0, entry_scales)
+    quantized = np.rint(values / denominators).clip(-32767, 32767)
+    return _SparseCorrectives(
+        offsets=offsets,
+        indices=np.ascontiguousarray(coefficient_indices, dtype="<u2"),
+        values=np.ascontiguousarray(quantized, dtype="<i2"),
+        scales=np.ascontiguousarray(scales, dtype="<f4"),
+    )
+
+
+def _quantize_rows(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    maxima = np.maximum(values.max(axis=1), -values.min(axis=1))
+    scales = maxima / 32767.0
     nonzero_scales = np.where(scales == 0.0, 1.0, scales)
-    quantized = np.rint(basis / nonzero_scales[:, None]).clip(-32767, 32767)
+    quantized = np.empty_like(values)
+    np.divide(values, nonzero_scales[:, None], out=quantized)
+    np.rint(quantized, out=quantized)
+    np.clip(quantized, -32767, 32767, out=quantized)
     return (
         np.ascontiguousarray(quantized, dtype="<i2"),
         np.ascontiguousarray(scales, dtype="<f4"),
@@ -367,7 +379,9 @@ def _quantize_corrective_basis(
 def _sparse_skin_weights(weights: Any) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     dense = np.asarray(weights, dtype=np.float32)
     if dense.ndim != 2:
-        raise ValueError(f"Expected skin weights with shape [vertices, joints], got {dense.shape}.")
+        raise ValueError(
+            f"Expected skin weights with shape [vertices, joints], got {dense.shape}."
+        )
     if dense.shape[1] > np.iinfo(np.uint16).max:
         raise ValueError("Skinning supports at most 65535 joints.")
     active = dense != 0.0

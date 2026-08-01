@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import types
-
 import body_models
 import numpy as np
 import pytest
@@ -25,14 +23,6 @@ class StubRigidModel(RigidBodyModel):
     """Two one-triangle links; link i rotates about z by body_pose[i] at x=i."""
 
     parents = (-1, 0)
-
-    def __init__(self) -> None:
-        self._weights = types.SimpleNamespace(
-            link_vertex_starts=[0, 3],
-            link_vertex_counts=[3, 3],
-            link_face_starts=[0, 1],
-            link_face_counts=[1, 1],
-        )
 
     @property
     def parameter_spec(self):
@@ -73,6 +63,13 @@ class StubRigidModel(RigidBodyModel):
     def link_joint_indices(self):
         return [0, 1]
 
+    @property
+    def link_meshes(self):
+        return [
+            trimesh.Trimesh(vertices, [[0, 1, 2]], process=False)
+            for vertices in LOCAL_VERTICES
+        ]
+
     def get_rest_pose(self, batch_dims=()):
         return {
             "body_pose": np.array([0.4, -0.7], dtype=np.float32),
@@ -112,7 +109,7 @@ def test_add_bakes_link_local_meshes(scene, monkeypatch):
     handle = bmv.add_rigid_body_model(scene, "/rigid_add", StubRigidModel())
 
     assert len(handle.links) == 2
-    for (vertices, faces), local in zip(recorded, LOCAL_VERTICES):
+    for (vertices, faces), local in zip(recorded, LOCAL_VERTICES, strict=True):
         np.testing.assert_allclose(vertices, local, atol=1e-6)
         np.testing.assert_array_equal(faces, [[0, 1, 2]])
     handle.remove()
@@ -123,7 +120,7 @@ def test_add_places_links_at_rest_transforms(scene):
     handle = bmv.add_rigid_body_model(scene, "/rigid_rest", model)
 
     rest_links = model.forward_links(**model.get_rest_pose())
-    for link, transform in zip(handle.links, rest_links):
+    for link, transform in zip(handle.links, rest_links, strict=True):
         np.testing.assert_allclose(link.position, transform[:3, 3], atol=1e-6)
     handle.remove()
 

@@ -10,15 +10,36 @@ type MeshProps = {
   receive_shadow: boolean | number;
 };
 
-type AssetMessage = {
+type CorrectiveMessage =
+  | {
+      corrective_format: null;
+      corrective_values: null;
+      corrective_scales: null;
+      corrective_offsets: null;
+      corrective_indices: null;
+    }
+  | {
+      corrective_format: "dense";
+      corrective_values: Int16Array;
+      corrective_scales: Float32Array;
+      corrective_offsets: null;
+      corrective_indices: null;
+    }
+  | {
+      corrective_format: "sparse";
+      corrective_values: Int16Array;
+      corrective_scales: Float32Array;
+      corrective_offsets: Uint32Array;
+      corrective_indices: Uint16Array;
+    };
+
+type AssetMessage = CorrectiveMessage & {
   type: "BodyModelsViserAssetMessage";
   asset_id: number;
   faces: Uint32Array;
   skin_weight_offsets: Uint32Array;
   skin_weight_indices: Uint16Array;
   skin_weight_values: Float32Array;
-  corrective_basis: Int16Array | null;
-  corrective_scales: Float32Array | null;
 };
 
 type ModelMessage = {
@@ -91,9 +112,23 @@ type WasmExports = {
   memory: WebAssembly.Memory;
   alloc(size: number): number;
   wasm_free(ptr: number, len: number): void;
-  compute_pose_offsets(
-    basisPtr: number,
-    basisLen: number,
+  compute_dense_pose_offsets(
+    valuesPtr: number,
+    valuesLen: number,
+    scalesPtr: number,
+    scalesLen: number,
+    coefficientsPtr: number,
+    coefficientsLen: number,
+    outputPtr: number,
+    outputLen: number,
+  ): void;
+  compute_sparse_pose_offsets(
+    offsetsPtr: number,
+    offsetsLen: number,
+    indicesPtr: number,
+    indicesLen: number,
+    valuesPtr: number,
+    valuesLen: number,
     scalesPtr: number,
     scalesLen: number,
     coefficientsPtr: number,
@@ -141,13 +176,37 @@ type GpuBatch = {
 };
 type GpuAsset = {
   context: GpuContext;
-  basis: GpuBuffer;
-  scales: GpuBuffer;
+  correctiveValues: GpuBuffer;
+  correctiveScales: GpuBuffer;
+  correctiveOffsets: GpuBuffer;
+  correctiveIndices: GpuBuffer;
   weightOffsets: GpuBuffer;
   weightIndices: GpuBuffer;
   weightValues: GpuBuffer;
   batch: GpuBatch | null;
 };
+
+type DenseCorrectives = {
+  format: "dense";
+  values: WasmBuffer | null;
+  scales: WasmBuffer | null;
+  valueValues: Int16Array;
+  scaleValues: Float32Array;
+};
+
+type SparseCorrectives = {
+  format: "sparse";
+  values: WasmBuffer | null;
+  scales: WasmBuffer | null;
+  offsets: WasmBuffer | null;
+  indices: WasmBuffer | null;
+  valueValues: Int16Array;
+  scaleValues: Float32Array;
+  offsetValues: Uint32Array;
+  indexValues: Uint16Array;
+};
+
+type Correctives = DenseCorrectives | SparseCorrectives;
 
 type AssetState = {
   id: number;
@@ -155,10 +214,7 @@ type AssetState = {
   weightOffsets: WasmBuffer;
   weightIndices: WasmBuffer;
   weightValues: WasmBuffer;
-  correctiveBasis: WasmBuffer | null;
-  correctiveScales: WasmBuffer | null;
-  correctiveBasisValues: Int16Array | null;
-  correctiveScaleValues: Float32Array | null;
+  correctives: Correctives | null;
   weightOffsetValues: Uint32Array;
   weightIndexValues: Uint16Array;
   weightValueValues: Float32Array;
@@ -200,23 +256,51 @@ struct Params {
   rest_offset: u32,
   transform_offset: u32,
   global_offset: u32,
+  corrective_format: u32,
+  _padding_0: u32,
+  _padding_1: u32,
+  _padding_2: u32,
 }
 
-@group(0) @binding(0) var<storage, read> basis: array<u32>;
-@group(0) @binding(1) var<storage, read> scales: array<f32>;
-@group(0) @binding(2) var<storage, read> weight_offsets: array<u32>;
-@group(0) @binding(3) var<storage, read> weight_indices: array<u32>;
-@group(0) @binding(4) var<storage, read> weight_values: array<f32>;
-@group(0) @binding(5) var<storage, read> dynamic: array<f32>;
-@group(0) @binding(6) var<storage, read_write> output: array<f32>;
-@group(0) @binding(7) var<uniform> params: Params;
+@group(0) @binding(0) var<storage, read> corrective_values: array<u32>;
+@group(0) @binding(1) var<storage, read> corrective_scales: array<f32>;
+@group(0) @binding(2) var<storage, read> corrective_offsets: array<u32>;
+@group(0) @binding(3) var<storage, read> corrective_indices: array<u32>;
+@group(0) @binding(4) var<storage, read> weight_offsets: array<u32>;
+@group(0) @binding(5) var<storage, read> weight_indices: array<u32>;
+@group(0) @binding(6) var<storage, read> weight_values: array<f32>;
+@group(0) @binding(7) var<storage, read> dynamic: array<f32>;
+@group(0) @binding(8) var<storage, read_write> output: array<f32>;
+@group(0) @binding(9) var<uniform> params: Params;
 
 fn corrective_value(index: u32) -> f32 {
-  let word = basis[index >> 1u];
+  let word = corrective_values[index >> 1u];
   let raw = (word >> ((index & 1u) * 16u)) & 65535u;
   var signed = i32(raw);
   if (raw >= 32768u) { signed -= 65536; }
   return f32(signed);
+}
+
+fn corrective_offset(coordinate: u32, coefficient_base: u32) -> f32 {
+  var correction = 0.0;
+  if (params.corrective_format == 0u) {
+    let value_base = coordinate * params.coefficient_count;
+    for (var coefficient = 0u;
+         coefficient < params.coefficient_count;
+         coefficient++) {
+      correction += dynamic[coefficient_base + coefficient]
+        * corrective_value(value_base + coefficient);
+    }
+  } else {
+    for (var entry = corrective_offsets[coordinate];
+         entry < corrective_offsets[coordinate + 1u];
+         entry++) {
+      let coefficient = corrective_indices[entry];
+      correction += dynamic[coefficient_base + coefficient]
+        * corrective_value(entry);
+    }
+  }
+  return correction * corrective_scales[coordinate];
 }
 
 fn rotate_axis_angle(point: vec3<f32>, rotation: vec3<f32>) -> vec3<f32> {
@@ -242,13 +326,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     dynamic[rest_base], dynamic[rest_base + 1u], dynamic[rest_base + 2u]
   );
   for (var component = 0u; component < 3u; component++) {
-    var correction = 0.0;
-    let basis_base = (coordinate + component) * params.coefficient_count;
-    for (var coefficient = 0u; coefficient < params.coefficient_count; coefficient++) {
-      correction += dynamic[coefficient_base + coefficient]
-        * corrective_value(basis_base + coefficient);
-    }
-    point[component] += correction * scales[coordinate + component];
+    point[component] += corrective_offset(coordinate + component, coefficient_base);
   }
 
   let transform_body_base = params.transform_offset
@@ -356,18 +434,35 @@ class BodyModelsViserRuntime {
     if (this.assets.has(message.asset_id)) {
       return;
     }
-    const hasCorrectives =
-      message.corrective_basis !== null && message.corrective_scales !== null;
+    let correctives: Correctives | null = null;
+    if (message.corrective_format === "dense") {
+      correctives = {
+        format: "dense",
+        values: null,
+        scales: null,
+        valueValues: message.corrective_values,
+        scaleValues: message.corrective_scales,
+      };
+    } else if (message.corrective_format === "sparse") {
+      correctives = {
+        format: "sparse",
+        values: null,
+        scales: null,
+        offsets: null,
+        indices: null,
+        valueValues: message.corrective_values,
+        scaleValues: message.corrective_scales,
+        offsetValues: message.corrective_offsets,
+        indexValues: message.corrective_indices,
+      };
+    }
     const asset: AssetState = {
       id: message.asset_id,
       faces: message.faces,
       weightOffsets: this.copyToWasm(message.skin_weight_offsets),
       weightIndices: this.copyToWasm(message.skin_weight_indices),
       weightValues: this.copyToWasm(message.skin_weight_values),
-      correctiveBasis: null,
-      correctiveScales: null,
-      correctiveBasisValues: message.corrective_basis,
-      correctiveScaleValues: message.corrective_scales,
+      correctives,
       weightOffsetValues: message.skin_weight_offsets,
       weightIndexValues: message.skin_weight_indices,
       weightValueValues: message.skin_weight_values,
@@ -378,7 +473,7 @@ class BodyModelsViserRuntime {
       disposeWhenIdle: false,
       gpu: null,
     };
-    if (hasCorrectives) {
+    if (correctives !== null) {
       asset.gpu = this.createGpuAsset(asset).catch((error) => {
         this.warnGpuFallback(error);
         return null;
@@ -563,19 +658,38 @@ class BodyModelsViserRuntime {
   private renderWasm(mesh: MeshState): void {
     const wasm = this.requireWasm();
     if (mesh.poseCoefficients !== null) {
-      const asset = mesh.asset;
-      asset.correctiveBasis ??= this.copyToWasm(asset.correctiveBasisValues!);
-      asset.correctiveScales ??= this.copyToWasm(asset.correctiveScaleValues!);
-      wasm.compute_pose_offsets(
-        asset.correctiveBasis!.ptr,
-        asset.correctiveBasis!.len,
-        asset.correctiveScales!.ptr,
-        asset.correctiveScales!.len,
-        mesh.poseCoefficients.ptr,
-        mesh.poseCoefficients.len,
-        mesh.poseOffsets.ptr,
-        mesh.poseOffsets.len,
-      );
+      const correctives = mesh.asset.correctives!;
+      correctives.values ??= this.copyToWasm(correctives.valueValues);
+      correctives.scales ??= this.copyToWasm(correctives.scaleValues);
+      if (correctives.format === "dense") {
+        wasm.compute_dense_pose_offsets(
+          correctives.values.ptr,
+          correctives.values.len,
+          correctives.scales.ptr,
+          correctives.scales.len,
+          mesh.poseCoefficients.ptr,
+          mesh.poseCoefficients.len,
+          mesh.poseOffsets.ptr,
+          mesh.poseOffsets.len,
+        );
+      } else {
+        correctives.offsets ??= this.copyToWasm(correctives.offsetValues);
+        correctives.indices ??= this.copyToWasm(correctives.indexValues);
+        wasm.compute_sparse_pose_offsets(
+          correctives.offsets.ptr,
+          correctives.offsets.len,
+          correctives.indices.ptr,
+          correctives.indices.len,
+          correctives.values.ptr,
+          correctives.values.len,
+          correctives.scales.ptr,
+          correctives.scales.len,
+          mesh.poseCoefficients.ptr,
+          mesh.poseCoefficients.len,
+          mesh.poseOffsets.ptr,
+          mesh.poseOffsets.len,
+        );
+      }
     }
     wasm.forward_vertices_sparse(
       mesh.asset.weightOffsets.ptr,
@@ -706,20 +820,26 @@ class BodyModelsViserRuntime {
         restOffset,
         transformOffset,
         globalOffset,
+        firstMesh.asset.correctives!.format === "dense" ? 0 : 1,
+        0,
+        0,
+        0,
       ]),
       usage.UNIFORM,
     );
     const bindGroup = device.createBindGroup({
       layout: gpu.context.pipeline.getBindGroupLayout(0),
       entries: [
-        { binding: 0, resource: { buffer: gpu.basis } },
-        { binding: 1, resource: { buffer: gpu.scales } },
-        { binding: 2, resource: { buffer: gpu.weightOffsets } },
-        { binding: 3, resource: { buffer: gpu.weightIndices } },
-        { binding: 4, resource: { buffer: gpu.weightValues } },
-        { binding: 5, resource: { buffer: dynamic } },
-        { binding: 6, resource: { buffer: output } },
-        { binding: 7, resource: { buffer: params } },
+        { binding: 0, resource: { buffer: gpu.correctiveValues } },
+        { binding: 1, resource: { buffer: gpu.correctiveScales } },
+        { binding: 2, resource: { buffer: gpu.correctiveOffsets } },
+        { binding: 3, resource: { buffer: gpu.correctiveIndices } },
+        { binding: 4, resource: { buffer: gpu.weightOffsets } },
+        { binding: 5, resource: { buffer: gpu.weightIndices } },
+        { binding: 6, resource: { buffer: gpu.weightValues } },
+        { binding: 7, resource: { buffer: dynamic } },
+        { binding: 8, resource: { buffer: output } },
+        { binding: 9, resource: { buffer: params } },
       ],
     });
     gpu.batch = {
@@ -743,23 +863,42 @@ class BodyModelsViserRuntime {
     if (context === null) {
       return null;
     }
+    const correctives = asset.correctives!;
     const usage = (globalThis as any).GPUBufferUsage;
-    const basisBytes = new Uint8Array(
-      Math.ceil(asset.correctiveBasisValues!.byteLength / 4) * 4,
+    const correctiveBytes = new Uint8Array(
+      Math.ceil(correctives.valueValues.byteLength / 4) * 4,
     );
-    basisBytes.set(
+    correctiveBytes.set(
       new Uint8Array(
-        asset.correctiveBasisValues!.buffer,
-        asset.correctiveBasisValues!.byteOffset,
-        asset.correctiveBasisValues!.byteLength,
+        correctives.valueValues.buffer,
+        correctives.valueValues.byteOffset,
+        correctives.valueValues.byteLength,
       ),
     );
     return {
       context,
-      basis: this.createGpuBuffer(context.device, basisBytes, usage.STORAGE),
-      scales: this.createGpuBuffer(
+      correctiveValues: this.createGpuBuffer(
         context.device,
-        asset.correctiveScaleValues!,
+        correctiveBytes,
+        usage.STORAGE,
+      ),
+      correctiveScales: this.createGpuBuffer(
+        context.device,
+        correctives.scaleValues,
+        usage.STORAGE,
+      ),
+      correctiveOffsets: this.createGpuBuffer(
+        context.device,
+        correctives.format === "sparse"
+          ? correctives.offsetValues
+          : new Uint32Array([0]),
+        usage.STORAGE,
+      ),
+      correctiveIndices: this.createGpuBuffer(
+        context.device,
+        correctives.format === "sparse"
+          ? Uint32Array.from(correctives.indexValues)
+          : new Uint32Array([0]),
         usage.STORAGE,
       ),
       weightOffsets: this.createGpuBuffer(
@@ -919,11 +1058,22 @@ class BodyModelsViserRuntime {
     this.freeBuffer(asset.weightOffsets);
     this.freeBuffer(asset.weightIndices);
     this.freeBuffer(asset.weightValues);
-    if (asset.correctiveBasis !== null) {
-      this.freeBuffer(asset.correctiveBasis);
-    }
-    if (asset.correctiveScales !== null) {
-      this.freeBuffer(asset.correctiveScales);
+    const correctives = asset.correctives;
+    if (correctives !== null) {
+      if (correctives.values !== null) {
+        this.freeBuffer(correctives.values);
+      }
+      if (correctives.scales !== null) {
+        this.freeBuffer(correctives.scales);
+      }
+      if (correctives.format === "sparse") {
+        if (correctives.offsets !== null) {
+          this.freeBuffer(correctives.offsets);
+        }
+        if (correctives.indices !== null) {
+          this.freeBuffer(correctives.indices);
+        }
+      }
     }
     if (asset.gpu !== null) {
       void asset.gpu.then((gpu) => {
@@ -937,8 +1087,10 @@ class BodyModelsViserRuntime {
 
   private destroyGpuAsset(gpu: GpuAsset): void {
     this.freeGpuBatch(gpu.batch);
-    gpu.basis.destroy();
-    gpu.scales.destroy();
+    gpu.correctiveValues.destroy();
+    gpu.correctiveScales.destroy();
+    gpu.correctiveOffsets.destroy();
+    gpu.correctiveIndices.destroy();
     gpu.weightOffsets.destroy();
     gpu.weightIndices.destroy();
     gpu.weightValues.destroy();

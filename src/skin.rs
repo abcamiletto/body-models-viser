@@ -11,21 +11,39 @@ pub struct ForwardInputs<'a> {
     pub global_translation: &'a [f32],
 }
 
-pub fn compute_pose_offsets(
-    basis: &[i16],
+pub fn compute_dense_pose_offsets(
+    values: &[i16],
     scales: &[f32],
     coefficients: &[f32],
     output: &mut [f32],
 ) {
     for (coordinate, value) in output.iter_mut().enumerate() {
         let start = coordinate * coefficients.len();
-        let row = &basis[start..start + coefficients.len()];
+        let row = &values[start..start + coefficients.len()];
         let sum = row
             .iter()
             .zip(coefficients)
             .map(|(&basis_value, &coefficient)| f32::from(basis_value) * coefficient)
             .sum::<f32>();
         *value = sum * scales[coordinate];
+    }
+}
+
+pub fn compute_sparse_pose_offsets(
+    offsets: &[u32],
+    indices: &[u16],
+    values: &[i16],
+    scales: &[f32],
+    coefficients: &[f32],
+    output: &mut [f32],
+) {
+    for (coordinate, output_value) in output.iter_mut().enumerate() {
+        let start = offsets[coordinate] as usize;
+        let end = offsets[coordinate + 1] as usize;
+        let sum = (start..end)
+            .map(|entry| f32::from(values[entry]) * coefficients[usize::from(indices[entry])])
+            .sum::<f32>();
+        *output_value = sum * scales[coordinate];
     }
 }
 
@@ -112,11 +130,27 @@ mod tests {
     }
 
     #[test]
-    fn corrective_basis_is_dequantized_per_coordinate() {
+    fn dense_correctives_are_dequantized_per_coordinate() {
         let mut output = [0.0; 2];
 
-        compute_pose_offsets(&[2, -1, 4, 3], &[0.5, 0.25], &[3.0, 2.0], &mut output);
+        compute_dense_pose_offsets(&[2, -1, 4, 3], &[0.5, 0.25], &[3.0, 2.0], &mut output);
 
         assert_eq!(output, [2.0, 4.5]);
+    }
+
+    #[test]
+    fn sparse_correctives_are_dequantized_per_coordinate() {
+        let mut output = [0.0; 3];
+
+        compute_sparse_pose_offsets(
+            &[0, 2, 2, 3],
+            &[0, 2, 1],
+            &[2, -1, 4],
+            &[0.5, 0.0, 0.25],
+            &[3.0, 2.0, 5.0],
+            &mut output,
+        );
+
+        assert_eq!(output, [0.5, 0.0, 2.0]);
     }
 }

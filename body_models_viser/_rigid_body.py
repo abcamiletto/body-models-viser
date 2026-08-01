@@ -84,7 +84,7 @@ class ViserRigidBodyModelHandle:
         rotations = transforms[:, :3, :3]
         wxyzs = SO3.conversions.from_rotmat_to_quat(rotations, convention="wxyz", xp=np)
         positions = transforms[:, :3, 3]
-        for handle, wxyz, position in zip(self.links, wxyzs, positions):
+        for handle, wxyz, position in zip(self.links, wxyzs, positions, strict=True):
             handle.wxyz = wxyz
             handle.position = position
 
@@ -105,36 +105,21 @@ def add_rigid_body_model(
     if not isinstance(model, RigidBodyModel):
         model_name = model.__class__.__name__
         expected = "body_models.RigidBodyModel"
-        raise TypeError(f"add_rigid_body_model() expects a {expected}, got {model_name}.")
+        raise TypeError(
+            f"add_rigid_body_model() expects a {expected}, got {model_name}."
+        )
 
     pose = model.get_rest_pose()
-    rest_links = np.asarray(model.forward_links(**pose))
-    rest_mesh = model.forward_meshes(**pose)[0]
     root = scene.add_frame(name, show_axes=False)
-    # body-models 0.20.1 has no public accessor for per-link mesh ranges.
-    weights = model._weights
-
-    links = []
-    for index in range(len(model.link_names)):
-        vertex_start = weights.link_vertex_starts[index]
-        vertex_count = weights.link_vertex_counts[index]
-        face_start = weights.link_face_starts[index]
-        face_count = weights.link_face_counts[index]
-        world_vertices = rest_mesh.vertices[vertex_start : vertex_start + vertex_count]
-        faces = rest_mesh.faces[face_start : face_start + face_count] - vertex_start
-        # Bake each link mesh into its link frame so pose updates only move the
-        # scene node: local = R^T (world - t) for the rest link transform.
-        rotation = rest_links[index, :3, :3]
-        translation = rest_links[index, :3, 3]
-        local_vertices = (world_vertices - translation) @ rotation
-        links.append(
-            scene.add_mesh_simple(
-                f"{name}/links/{index:03d}",
-                vertices=local_vertices.astype(np.float32),
-                faces=faces,
-                color=color,
-            )
+    links = [
+        scene.add_mesh_simple(
+            f"{name}/links/{index:03d}",
+            vertices=np.asarray(mesh.vertices, dtype=np.float32),
+            faces=np.asarray(mesh.faces, dtype=np.uint32),
+            color=color,
         )
+        for index, mesh in enumerate(model.link_meshes)
+    ]
     handle = ViserRigidBodyModelHandle(model, pose, root, links)
     handle._apply_pose()
     return handle
