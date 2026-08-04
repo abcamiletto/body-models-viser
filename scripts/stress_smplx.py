@@ -8,7 +8,7 @@ import time
 
 import numpy as np
 import viser
-from body_models.smplx import SMPLX
+from body_models.smplx.numpy import SMPLX
 
 import body_models_viser as bmv
 from body_models_viser import _runtime

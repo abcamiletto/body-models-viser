@@ -16,7 +16,7 @@ SMPL-X, MANO, FLAME, MHR, SOMA, SKEL, ANNY, and GarmentMeasurements.
 ```python
 import body_models_viser as bmv
 import viser
-from body_models.smpl import SMPL
+from body_models.smpl.numpy import SMPL
 
 server = viser.ViserServer()
 model = SMPL(gender="neutral")
@@ -89,9 +89,9 @@ BrainCo, SmplHumanoid, and MyoFullBody.
 
 ```python
 import body_models_viser as bmv
-from body_models import create_model
+from body_models.g1.numpy import G1
 
-model = create_model("g1")
+model = G1()
 handle = bmv.add_rigid_body_model(server.scene, "/robot", model)
 handle.set_pose(body_pose=handle.pose["body_pose"])
 ```

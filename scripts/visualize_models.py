@@ -4,7 +4,7 @@ import time
 
 import numpy as np
 import viser
-from body_models.smpl import SMPL
+from body_models.smpl.numpy import SMPL
 
 import body_models_viser as bmv
 
