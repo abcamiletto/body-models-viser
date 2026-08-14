@@ -82,24 +82,6 @@ handle.visible = True
 handle.joint_positions = joint_positions
 ```
 
-### Rigid Body Models
-
-Use `add_rigid_body_model()` for any `body_models.RigidBodyModel`, such as G1,
-BrainCo, SmplHumanoid, and MyoFullBody.
-
-```python
-import body_models_viser as bmv
-from body_models.g1.numpy import G1
-
-model = G1()
-handle = bmv.add_rigid_body_model(server.scene, "/robot", model)
-handle.set_pose(body_pose=handle.pose["body_pose"])
-```
-
-The rigid-body helper creates one static mesh from each public `link_meshes`
-entry, then only updates its transform from `forward_links()` when the pose
-changes.
-
 ## Runtime
 
 `bmv.add_body_model(scene, name, model)` does three things:
@@ -120,8 +102,8 @@ dense, while sparse bases remain sparse. The resulting vertex buffer is sent to
 viser as a regular mesh message.
 
 The browser protocol is model-agnostic. It consumes only the public
-`SkinningSpec`, prepared identity and pose state, and `link_meshes` contracts
-introduced in `body-models` 0.21.1.
+`SkinningSpec` and prepared identity and pose state from `body-models` 0.24.1
+or newer.
 
 ## viser compatibility
 
