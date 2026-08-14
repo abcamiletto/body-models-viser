@@ -401,7 +401,7 @@ def _f32(array: Any) -> np.ndarray:
 
 
 def _parameter_keys(
-    model: body_models.ArticulatedModel,
+    model: body_models.SkinnedModel,
     role: body_models.ParameterRole,
 ) -> set[str]:
     return {name for name, spec in model.parameter_spec.items() if spec.role == role}
