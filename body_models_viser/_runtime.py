@@ -53,6 +53,9 @@ class BodyModelsViserModelMessage(
     pose_coefficients: npt.NDArray[np.float32] | None
     global_rotation: npt.NDArray[np.float32]
     global_translation: npt.NDArray[np.float32]
+    wxyz: tuple[float, float, float, float]
+    position: tuple[float, float, float]
+    visible: bool
     props: dict[str, Any]
 
 
