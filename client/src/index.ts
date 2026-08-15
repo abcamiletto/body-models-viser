@@ -51,6 +51,9 @@ type ModelMessage = {
   pose_coefficients: Float32Array | null;
   global_rotation: Float32Array;
   global_translation: Float32Array;
+  wxyz: [number, number, number, number];
+  position: [number, number, number];
+  visible: boolean;
   props: MeshProps;
 };
 
@@ -88,6 +91,16 @@ type SetSceneNodeVisibilityMessage = {
   name: string;
   visible: boolean;
 };
+type SetOrientationMessage = {
+  type: "SetOrientationMessage";
+  name: string;
+  wxyz: [number, number, number, number];
+};
+type SetPositionMessage = {
+  type: "SetPositionMessage";
+  name: string;
+  position: [number, number, number];
+};
 type Message =
   | AssetMessage
   | ModelMessage
@@ -97,6 +110,8 @@ type Message =
   | MeshMessage
   | RemoveSceneNodeMessage
   | SetSceneNodeVisibilityMessage
+  | SetOrientationMessage
+  | SetPositionMessage
   | { type: string };
 
 type ViewerLike = {
@@ -243,7 +258,10 @@ type MeshState = {
   globalTranslationValues: Float32Array;
   props: MeshProps;
   restVersion: number;
-  visibilitySent: boolean;
+  sceneStateSent: boolean;
+  wxyz: [number, number, number, number];
+  position: [number, number, number];
+  visible: boolean;
 };
 
 const CORRECTIVE_SHADER = /* wgsl */ `
@@ -515,7 +533,10 @@ class BodyModelsViserRuntime {
       globalTranslationValues: message.global_translation.slice(),
       props: message.props,
       restVersion: 0,
-      visibilitySent: false,
+      sceneStateSent: false,
+      wxyz: message.wxyz,
+      position: message.position,
+      visible: message.visible,
     };
     asset.meshes.add(mesh);
     this.meshes.set(message.name, mesh);
@@ -964,9 +985,15 @@ class BodyModelsViserRuntime {
   private pushMesh(mesh: MeshState, vertices: Float32Array): void {
     this.modelRenders.push(performance.now());
     const queue = this.getViewer().mutable.current.messageQueue;
-    if (!mesh.visibilitySent) {
-      queue.push({ type: "SetSceneNodeVisibilityMessage", name: mesh.name, visible: true });
-      mesh.visibilitySent = true;
+    if (!mesh.sceneStateSent) {
+      queue.push({ type: "SetOrientationMessage", name: mesh.name, wxyz: mesh.wxyz });
+      queue.push({ type: "SetPositionMessage", name: mesh.name, position: mesh.position });
+      queue.push({
+        type: "SetSceneNodeVisibilityMessage",
+        name: mesh.name,
+        visible: mesh.visible,
+      });
+      mesh.sceneStateSent = true;
     }
     queue.push({
       type: "MeshMessage",

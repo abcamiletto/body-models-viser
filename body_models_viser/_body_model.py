@@ -47,6 +47,9 @@ class BodyModelHandle:
         params: Params,
         *,
         use_pose_correctives: bool,
+        wxyz: tuple[float, float, float, float] | np.ndarray,
+        position: tuple[float, float, float] | np.ndarray,
+        visible: bool,
     ) -> None:
         self.scene = scene
         self.name = name
@@ -54,6 +57,9 @@ class BodyModelHandle:
         self.params = params
         self.use_pose_correctives = use_pose_correctives
         self._asset_key = (model, use_pose_correctives)
+        self._wxyz = _vector(wxyz, 4)
+        self._position = _vector(position, 3)
+        self._visible = bool(visible)
         self._prepared_identity = self._prepare_identity()
 
     def __getattr__(self, key: str) -> np.ndarray:
@@ -76,6 +82,56 @@ class BodyModelHandle:
                 self.set_transform(**{key: value})
                 return
         super().__setattr__(key, value)
+
+    @property
+    def wxyz(self) -> np.ndarray:
+        """Scene-node rotation applied after the body-model transform."""
+        return self._wxyz
+
+    @wxyz.setter
+    def wxyz(self, value: tuple[float, float, float, float] | np.ndarray) -> None:
+        value = _vector(value, 4)
+        if np.allclose(value, self._wxyz):
+            return
+        self._wxyz = value
+        wxyz = tuple(map(float, value))
+        self._update_scene_node(
+            _messages.SetOrientationMessage(self.name, wxyz),
+            wxyz=wxyz,
+        )
+
+    @property
+    def position(self) -> np.ndarray:
+        """Scene-node translation applied after the body-model transform."""
+        return self._position
+
+    @position.setter
+    def position(self, value: tuple[float, float, float] | np.ndarray) -> None:
+        value = _vector(value, 3)
+        if np.allclose(value, self._position):
+            return
+        self._position = value
+        position = tuple(map(float, value))
+        self._update_scene_node(
+            _messages.SetPositionMessage(self.name, position),
+            position=position,
+        )
+
+    @property
+    def visible(self) -> bool:
+        """Whether the body model is visible in the scene."""
+        return self._visible
+
+    @visible.setter
+    def visible(self, value: bool) -> None:
+        value = bool(value)
+        if value == self._visible:
+            return
+        self._visible = value
+        self._update_scene_node(
+            _messages.SetSceneNodeVisibilityMessage(self.name, value),
+            visible=value,
+        )
 
     def set_identity(self, **params: np.ndarray) -> None:
         invalid = params.keys() - _parameter_keys(self.model, "identity")
@@ -179,6 +235,13 @@ class BodyModelHandle:
         for key, value in params.items():
             self.params[key] = np.asarray(value, dtype=np.float32).copy()
 
+    def _update_scene_node(self, message: _messages.Message, **changes: Any) -> None:
+        state = _runtime.get_state(self.scene)
+        state.models[self.name] = dataclasses.replace(
+            state.models[self.name], **changes
+        )
+        _runtime.broadcast(self.scene, message)
+
 
 def add_body_model(
     scene: Any,
@@ -195,6 +258,9 @@ def add_body_model(
     scale: float | tuple[float, float, float] = 1.0,
     cast_shadow: bool = True,
     receive_shadow: bool | float = True,
+    wxyz: tuple[float, float, float, float] | np.ndarray = (1.0, 0.0, 0.0, 0.0),
+    position: tuple[float, float, float] | np.ndarray = (0.0, 0.0, 0.0),
+    visible: bool = True,
 ) -> BodyModelHandle:
     """Add a browser-skinned body model.
 
@@ -224,6 +290,9 @@ def add_body_model(
         model,
         params,
         use_pose_correctives=use_pose_correctives,
+        wxyz=wxyz,
+        position=position,
+        visible=visible,
     )
     pose, coefficients = handle._prepare_deformation()
     asset, is_new_asset = _acquire_asset(
@@ -254,6 +323,9 @@ def add_body_model(
         pose_coefficients=coefficients,
         global_rotation=_f32(params["global_rotation"]),
         global_translation=_f32(params["global_translation"]),
+        wxyz=tuple(map(float, handle.wxyz)),
+        position=tuple(map(float, handle.position)),
+        visible=handle.visible,
         props=props,
     )
     state.models[name] = message
@@ -398,6 +470,13 @@ def _sparse_skin_weights(weights: Any) -> tuple[np.ndarray, np.ndarray, np.ndarr
 
 def _f32(array: Any) -> np.ndarray:
     return np.ascontiguousarray(array, dtype="<f4")
+
+
+def _vector(value: Any, length: int) -> np.ndarray:
+    vector = np.asarray(value, dtype=np.float64)
+    if vector.shape != (length,):
+        raise ValueError(f"Expected shape {(length,)}, got {vector.shape}.")
+    return vector.copy()
 
 
 def _parameter_keys(

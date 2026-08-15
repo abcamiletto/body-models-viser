@@ -3,6 +3,7 @@ from __future__ import annotations
 import body_models
 import numpy as np
 import pytest
+from viser import _messages
 from conftest import FakeClientState, StubModel
 
 import body_models_viser as bmv
@@ -217,6 +218,41 @@ def test_property_setters_route_to_updates(scene):
 
     message = state_of(scene).models["/stub"]
     np.testing.assert_array_equal(message.skinning_transforms[:, :3, 3], posed)
+
+
+def test_scene_node_properties_update_state_and_broadcast(scene, monkeypatch):
+    messages = []
+    monkeypatch.setattr(
+        _runtime, "broadcast", lambda scene, message: messages.append(message)
+    )
+    handle = bmv.add_body_model(
+        scene,
+        "/stub",
+        StubModel(),
+        wxyz=(0.0, 1.0, 0.0, 0.0),
+        position=(1.0, 2.0, 3.0),
+        visible=False,
+    )
+
+    np.testing.assert_array_equal(handle.wxyz, [0.0, 1.0, 0.0, 0.0])
+    np.testing.assert_array_equal(handle.position, [1.0, 2.0, 3.0])
+    assert handle.visible is False
+    model_message = state_of(scene).models["/stub"]
+    assert model_message.wxyz == (0.0, 1.0, 0.0, 0.0)
+    assert model_message.position == (1.0, 2.0, 3.0)
+    assert model_message.visible is False
+
+    handle.wxyz = (1.0, 0.0, 0.0, 0.0)
+    handle.position = (4.0, 5.0, 6.0)
+    handle.visible = True
+
+    model_message = state_of(scene).models["/stub"]
+    assert model_message.wxyz == (1.0, 0.0, 0.0, 0.0)
+    assert model_message.position == (4.0, 5.0, 6.0)
+    assert model_message.visible is True
+    assert isinstance(messages[-3], _messages.SetOrientationMessage)
+    assert isinstance(messages[-2], _messages.SetPositionMessage)
+    assert isinstance(messages[-1], _messages.SetSceneNodeVisibilityMessage)
 
 
 def test_invalid_keys_raise(scene):

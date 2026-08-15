@@ -33,11 +33,18 @@ handle.set_transform(global_translation=translation)
 shape = handle.shape.copy()
 shape[0] = 1.0
 handle.set_identity(shape=shape)
+
+# Apply an additional scene-node transform after the body-model transform.
+handle.position = (0.0, 0.0, 0.5)
+handle.wxyz = (1.0, 0.0, 0.0, 0.0)
+handle.visible = False
 ```
 
 `add_body_model()` returns a generic handle with `set_identity(...)`,
-`set_pose(...)`, `set_transform(...)`, `remove()`, `global_rotation`,
-`global_translation`, and the parameter properties declared by the model.
+`set_pose(...)`, `set_transform(...)`, `remove()`, `visible`, `position`, `wxyz`,
+`global_rotation`, `global_translation`, and the parameter properties declared
+by the model. `position` and `wxyz` are scene-node deltas applied after the
+body-model's global transform.
 
 Pose correctives are disabled by default. Enable them explicitly when their
 visual fidelity is needed:
