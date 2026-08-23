@@ -56,7 +56,7 @@ wheels = [
 
 [[package]]
 name = "body-models-viser"
-version = "0.6.1"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "body-models" },
@@ -80,7 +80,7 @@ requires-dist = [
     { name = "nodeenv" },
     { name = "numpy" },
     { name = "trimesh" },
-    { name = "viser", specifier = ">=1.0.29,<1.1" },
+    { name = "viser", specifier = ">=1.1.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -822,7 +822,7 @@ wheels = [
 
 [[package]]
 name = "viser"
-version = "1.0.29"
+version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "imageio" },
@@ -836,9 +836,9 @@ dependencies = [
     { name = "websockets" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/ef/118c59772bad5409ab1ffa234f5c429eb823b76c5f9f086c40158833d00d/viser-1.0.29.tar.gz", hash = "sha256:6229a985720a5da3f427647f04bccfdd437c3b21aafa5d2818bcd5f73cc1ad2b", size = 4907233, upload-time = "2026-05-20T10:28:50.522Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/4d/e3d9bb3cb71a3f5de21b9f35fb4db09c6f873885c02e9d9ace20d221aae1/viser-1.1.0.tar.gz", hash = "sha256:28c27da73f391fdc7a1ffc3e3d122fd8eede9d15508128bc53c7e02904169412", size = 5310056, upload-time = "2026-08-16T21:15:10.628Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/2b/b3461e44c999ad8e8819ac191e5437b0ed3444e9b1d6f2b22bc0bcc66b21/viser-1.0.29-py3-none-any.whl", hash = "sha256:807834e166c9156d08b2997cd992bef0c0892e780a1700ae5e1d65523978d780", size = 5009573, upload-time = "2026-05-20T10:28:48.548Z" },
+    { url = "https://files.pythonhosted.org/packages/73/b1/37b6fefb2f2fe5f11ae305d0a428e1cdb4f5868112c42ab29c1ce1629f06/viser-1.1.0-py3-none-any.whl", hash = "sha256:d683accd18d457d3971e107d6269b5a9e2dcc93d2a8661544ac433542e4550e8", size = 5464160, upload-time = "2026-08-16T21:15:08.786Z" },
 ]
 
 [[package]]
