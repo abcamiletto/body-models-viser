@@ -956,9 +956,11 @@ class BodyModelsViserRuntime {
       if (adapter === null) {
         return null;
       }
-      const device = await adapter.requestDevice();
+      const device = await adapter.requestDevice({
+        requiredLimits: { maxStorageBuffersPerShaderStage: 9 },
+      });
       const module = device.createShaderModule({ code: CORRECTIVE_SHADER });
-      const pipeline = device.createComputePipeline({
+      const pipeline = await device.createComputePipelineAsync({
         layout: "auto",
         compute: { module, entryPoint: "main" },
       });
@@ -985,6 +987,11 @@ class BodyModelsViserRuntime {
   private pushMesh(mesh: MeshState, vertices: Float32Array): void {
     this.modelRenders.push(performance.now());
     const queue = this.getViewer().mutable.current.messageQueue;
+    queue.push({
+      type: "MeshMessage",
+      name: mesh.name,
+      props: { ...mesh.props, vertices, faces: mesh.asset.faces },
+    });
     if (!mesh.sceneStateSent) {
       queue.push({ type: "SetOrientationMessage", name: mesh.name, wxyz: mesh.wxyz });
       queue.push({ type: "SetPositionMessage", name: mesh.name, position: mesh.position });
@@ -995,11 +1002,6 @@ class BodyModelsViserRuntime {
       });
       mesh.sceneStateSent = true;
     }
-    queue.push({
-      type: "MeshMessage",
-      name: mesh.name,
-      props: { ...mesh.props, vertices, faces: mesh.asset.faces },
-    });
   }
 
   private remove(message: RemoveSceneNodeMessage): void {

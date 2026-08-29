@@ -116,9 +116,9 @@ or newer.
 
 This package patches viser private internals (message serializer, websock
 client state, and the client React tree) to inject its runtime. The supported
-viser range is pinned in `pyproject.toml`; when raising the ceiling, run
-`uv run pytest` and `uv run scripts/visualize_models.py` against the new
-version and check a browser actually renders.
+minimum is viser 1.1.0. When raising it, run `uv run pytest` and
+`uv run scripts/visualize_models.py` against the new minimum, then check that
+a browser renders the body model.
 
 ## Development
 
