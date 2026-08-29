@@ -19,19 +19,16 @@ class FakeClient:
 
 
 @needs_client
-def test_client_connect_installs_runtime_once(scene):
+def test_client_connect_installs_runtime(scene):
     bmv.add_body_model(scene, "/stub", StubModel())
     websock = scene._websock_interface
-    state = _runtime.get_state(scene)
     client_state = FakeClientState()
     websock._client_state_from_id[999] = client_state
     try:
-        _runtime._on_client_connect(websock, state, FakeClient(999))
-        _runtime._on_client_connect(websock, state, FakeClient(999))
+        _runtime._install_client(websock, 999)
     finally:
         del websock._client_state_from_id[999]
 
-    assert 999 in state.installed_clients
     types = [type(message).__name__ for message in client_state.message_buffer.messages]
     assert types == ["RunJavascriptMessage"]
 
@@ -39,10 +36,8 @@ def test_client_connect_installs_runtime_once(scene):
 def test_client_disconnect_prunes_state(scene):
     bmv.add_body_model(scene, "/stub", StubModel())
     state = _runtime.get_state(scene)
-    state.installed_clients.add(7)
     state.ready_clients.add(7)
 
-    _runtime._on_client_disconnect(state, FakeClient(7))
+    scene._websock_interface._client_disconnect_cb[-1](FakeClient(7))
 
-    assert 7 not in state.installed_clients
     assert 7 not in state.ready_clients

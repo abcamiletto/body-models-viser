@@ -112,7 +112,6 @@ class RuntimeState:
     )
     next_asset_id: int = 1
     ready_clients: set[int] = dataclasses.field(default_factory=set)
-    installed_clients: set[int] = dataclasses.field(default_factory=set)
     initialized_serializers: weakref.WeakSet[Any] = dataclasses.field(
         default_factory=weakref.WeakSet
     )
@@ -134,10 +133,12 @@ def get_state(scene: Any) -> RuntimeState:
         _replay_state(websock._client_state_from_id[client_id], state)
 
     websock.register_handler(BodyModelsViserReadyMessage, ready)
-    websock.on_client_connect(lambda client: _on_client_connect(websock, state, client))
-    websock.on_client_disconnect(lambda client: _on_client_disconnect(state, client))
+    websock.on_client_connect(lambda client: _install_client(websock, client.client_id))
+    websock.on_client_disconnect(
+        lambda client: state.ready_clients.discard(client.client_id)
+    )
     for client_id in websock._client_state_from_id:
-        _install_client(websock, state, client_id)
+        _install_client(websock, client_id)
     return state
 
 
@@ -155,19 +156,7 @@ def broadcast(scene: Any, message: _messages.Message) -> None:
             client_state.message_buffer.push(message)
 
 
-def _on_client_connect(websock: Any, state: RuntimeState, client: Any) -> None:
-    _install_client(websock, state, client.client_id)
-
-
-def _on_client_disconnect(state: RuntimeState, client: Any) -> None:
-    state.ready_clients.discard(client.client_id)
-    state.installed_clients.discard(client.client_id)
-
-
-def _install_client(websock: Any, state: RuntimeState, client_id: int) -> None:
-    if client_id in state.installed_clients:
-        return
-    state.installed_clients.add(client_id)
+def _install_client(websock: Any, client_id: int) -> None:
     client_state = websock._client_state_from_id[client_id]
     client_state.message_buffer.push(
         _messages.RunJavascriptMessage(_install_javascript())

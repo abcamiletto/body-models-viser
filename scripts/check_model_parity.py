@@ -17,7 +17,6 @@ from body_models.smplh.numpy import SMPLH
 from body_models.smplx.numpy import SMPLX
 from body_models.soma.numpy import SOMA
 
-from body_models_viser import BodyModelHandle
 from body_models_viser._body_model import (
     _DenseCorrectives,
     _quantize_corrective_basis,
@@ -57,16 +56,20 @@ def main() -> None:
                 params[key].flat[0] = 0.15
         params["global_rotation"] = np.array([0.2, -0.1, 0.15], dtype=np.float32)
         params["global_translation"] = np.array([0.1, -0.2, 0.3], dtype=np.float32)
-        handle = BodyModelHandle(
-            scene=None,
-            name=name,
-            model=model,
-            params=params,
-            use_pose_correctives=False,
-        )
-        pose = handle._prepare_pose()
+        identity_params = {
+            key: params[key]
+            for key, spec in model.parameter_spec.items()
+            if spec.role == "identity"
+        }
+        identity = model.prepare_identity(**identity_params)
+        pose_params = {
+            key: params[key]
+            for key, spec in model.parameter_spec.items()
+            if spec.role == "pose"
+        }
+        pose = model.prepare_pose(**pose_params, identity=identity)
         spec = model.skinning_spec
-        rest_vertices = handle._prepared_identity["rest_vertices"]
+        rest_vertices = identity["rest_vertices"]
         transforms = pose["skinning_transforms"]
         offsets, indices, values = _sparse_skin_weights(spec.skinning_weights)
         pose_offsets_array = np.zeros_like(rest_vertices)
@@ -124,9 +127,7 @@ def main() -> None:
             for key, value in params.items()
             if model.parameter_spec[key].role != "identity"
         }
-        expected = model.forward_vertices(
-            **forward_params, identity=handle._prepared_identity
-        )
+        expected = model.forward_vertices(**forward_params, identity=identity)
         skin_offsets_ptr = write_array(store, memory, alloc, offsets)
         skin_indices_ptr = write_array(store, memory, alloc, indices)
         skin_values_ptr = write_array(store, memory, alloc, values)

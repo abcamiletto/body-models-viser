@@ -91,11 +91,9 @@ class BodyModelHandle:
     @wxyz.setter
     def wxyz(self, value: tuple[float, float, float, float] | np.ndarray) -> None:
         value = _vector(value, 4)
-        if np.allclose(value, self._wxyz):
-            return
         self._wxyz = value
         wxyz = tuple(map(float, value))
-        self._update_scene_node(
+        self._update_model(
             _messages.SetOrientationMessage(self.name, wxyz),
             wxyz=wxyz,
         )
@@ -108,11 +106,9 @@ class BodyModelHandle:
     @position.setter
     def position(self, value: tuple[float, float, float] | np.ndarray) -> None:
         value = _vector(value, 3)
-        if np.allclose(value, self._position):
-            return
         self._position = value
         position = tuple(map(float, value))
-        self._update_scene_node(
+        self._update_model(
             _messages.SetPositionMessage(self.name, position),
             position=position,
         )
@@ -125,20 +121,14 @@ class BodyModelHandle:
     @visible.setter
     def visible(self, value: bool) -> None:
         value = bool(value)
-        if value == self._visible:
-            return
         self._visible = value
-        self._update_scene_node(
+        self._update_model(
             _messages.SetSceneNodeVisibilityMessage(self.name, value),
             visible=value,
         )
 
     def set_identity(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - _parameter_keys(self.model, "identity")
-        if invalid:
-            names = ", ".join(sorted(invalid))
-            raise ValueError(f"Invalid identity parameter(s): {names}.")
-        self._update_params(params)
+        self._set_params("identity", params)
         self._prepared_identity = self._prepare_identity()
         pose, coefficients = self._prepare_deformation()
         message = BodyModelsViserIdentityMessage(
@@ -147,53 +137,39 @@ class BodyModelHandle:
             skinning_transforms=_f32(pose["skinning_transforms"]),
             pose_coefficients=coefficients,
         )
-        state = _runtime.get_state(self.scene)
-        state.models[self.name] = dataclasses.replace(
-            state.models[self.name],
+        self._update_model(
+            message,
             rest_vertices=message.rest_vertices,
             skinning_transforms=message.skinning_transforms,
             pose_coefficients=message.pose_coefficients,
         )
-        _runtime.broadcast(self.scene, message)
 
     def set_pose(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - _parameter_keys(self.model, "pose")
-        if invalid:
-            names = ", ".join(sorted(invalid))
-            raise ValueError(f"Invalid pose parameter(s): {names}.")
-        self._update_params(params)
+        self._set_params("pose", params)
         pose, coefficients = self._prepare_deformation()
         message = BodyModelsViserPoseMessage(
             name=self.name,
             skinning_transforms=_f32(pose["skinning_transforms"]),
             pose_coefficients=coefficients,
         )
-        state = _runtime.get_state(self.scene)
-        state.models[self.name] = dataclasses.replace(
-            state.models[self.name],
+        self._update_model(
+            message,
             skinning_transforms=message.skinning_transforms,
             pose_coefficients=message.pose_coefficients,
         )
-        _runtime.broadcast(self.scene, message)
 
     def set_transform(self, **params: np.ndarray) -> None:
-        invalid = params.keys() - _parameter_keys(self.model, "transform")
-        if invalid:
-            names = ", ".join(sorted(invalid))
-            raise ValueError(f"Invalid transform parameter(s): {names}.")
-        self._update_params(params)
+        self._set_params("transform", params)
         message = BodyModelsViserTransformMessage(
             name=self.name,
             global_rotation=_f32(self.params["global_rotation"]),
             global_translation=_f32(self.params["global_translation"]),
         )
-        state = _runtime.get_state(self.scene)
-        state.models[self.name] = dataclasses.replace(
-            state.models[self.name],
+        self._update_model(
+            message,
             global_rotation=message.global_rotation,
             global_translation=message.global_translation,
         )
-        _runtime.broadcast(self.scene, message)
 
     def remove(self) -> None:
         state = _runtime.get_state(self.scene)
@@ -231,11 +207,19 @@ class BodyModelHandle:
                 )
         return pose, coefficients
 
-    def _update_params(self, params: dict[str, np.ndarray]) -> None:
+    def _set_params(
+        self,
+        role: body_models.ParameterRole,
+        params: dict[str, np.ndarray],
+    ) -> None:
+        invalid = params.keys() - _parameter_keys(self.model, role)
+        if invalid:
+            names = ", ".join(sorted(invalid))
+            raise ValueError(f"Invalid {role} parameter(s): {names}.")
         for key, value in params.items():
             self.params[key] = np.asarray(value, dtype=np.float32).copy()
 
-    def _update_scene_node(self, message: _messages.Message, **changes: Any) -> None:
+    def _update_model(self, message: _messages.Message, **changes: Any) -> None:
         state = _runtime.get_state(self.scene)
         state.models[self.name] = dataclasses.replace(
             state.models[self.name], **changes
@@ -267,9 +251,6 @@ def add_body_model(
     Pose correctives are disabled by default. When enabled, the model's dense
     or sparse corrective basis is quantized once and evaluated in the browser.
     """
-    if not isinstance(model, body_models.SkinnedModel):
-        model_name = type(model).__name__
-        raise TypeError(f"Expected body_models.SkinnedModel, got {model_name}.")
     state = _runtime.get_state(scene)
     if name in state.models:
         raise ValueError(f"A body model named {name!r} already exists.")

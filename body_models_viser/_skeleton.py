@@ -39,8 +39,6 @@ class ViserSkeletonHandle:
 
     @wxyz.setter
     def wxyz(self, value: tuple[float, float, float, float] | np.ndarray) -> None:
-        value = np.asarray(value)
-        assert value.shape == (4,)
         self.root_frame.wxyz = value
 
     @property
@@ -49,8 +47,6 @@ class ViserSkeletonHandle:
 
     @position.setter
     def position(self, value: tuple[float, float, float] | np.ndarray) -> None:
-        value = np.asarray(value)
-        assert value.shape == (3,)
         self.root_frame.position = value
 
     @property
@@ -87,17 +83,16 @@ def add_skeleton(
     parents: Int[np.ndarray, "N"] | list[int] | tuple[int, ...],
     *,
     joint_names: tuple[str, ...] | None = None,
-    color: tuple[float, float, float] = (120, 180, 255),
-    joint_color: tuple[float, float, float] = (255, 255, 255),
+    color: tuple[int, int, int] = (120, 180, 255),
+    joint_color: tuple[int, int, int] = (255, 255, 255),
     bone_radius: float = 0.006,
     joint_radius: float = 0.015,
 ) -> ViserSkeletonHandle:
     """Add a clickable skeleton to a ``viser`` scene."""
     joint_positions = np.asarray(joint_positions, dtype=np.float32)
     parents = [int(parent) for parent in parents]
-    joint_names = joint_names or tuple(
-        f"joint_{index}" for index in range(len(joint_positions))
-    )
+    if joint_names is None:
+        joint_names = tuple(f"joint_{index}" for index in range(len(joint_positions)))
     parent_tree = [
         (parent, index) for index, parent in enumerate(parents) if parent >= 0
     ]
