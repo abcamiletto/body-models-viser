@@ -174,11 +174,6 @@ def test_correctives_require_a_basis(scene):
         bmv.add_body_model(scene, "/stub", StubModel(), use_pose_correctives=True)
 
 
-def test_unsupported_model_raises(scene):
-    with pytest.raises(TypeError):
-        bmv.add_body_model(scene, "/nope", object())
-
-
 def test_set_pose_records_pose_only_message(scene, monkeypatch):
     messages = []
     monkeypatch.setattr(

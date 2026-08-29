@@ -132,6 +132,7 @@ Build the browser bundle and WASM:
 
 ```sh
 cd client
+npm ci
 npm test
 ```
 
